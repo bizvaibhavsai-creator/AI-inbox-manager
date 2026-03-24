@@ -1,0 +1,160 @@
+{
+  "name": "3 - Follow-Up Cron",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            },
+            {
+              "triggerAtHour": 13,
+              "triggerAtMinute": 0
+            },
+            {
+              "triggerAtHour": 17,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "notes": "Runs at 9am, 1pm, 5pm daily"
+    },
+    {
+      "parameters": {
+        "url": "http://backend:8888/api/pending-followups",
+        "method": "GET"
+      },
+      "name": "Get Pending Follow-Ups",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.count }}",
+              "operation": "greaterThan",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Any Follow-Ups?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "followups"
+      },
+      "name": "Split Items",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [850, 250]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8888/api/generate-followup",
+        "jsonParameters": true,
+        "body": "={{ JSON.stringify({ reply_id: $json.reply_id }) }}"
+      },
+      "name": "Generate Follow-Up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1050, 250]
+    },
+    {
+      "parameters": {
+        "channel": "#inbox-manager",
+        "text": "",
+        "blocksUi": {
+          "blocksValues": [
+            {
+              "type": "section",
+              "textUi": {
+                "text": "*Follow-Up #{{ $json.sequence_num }} for {{ $json.lead_email }}*\n*Campaign:* {{ $json.campaign_name }}\n*Day Window:* {{ $json.day_window }} days"
+              }
+            },
+            {
+              "type": "section",
+              "textUi": {
+                "text": "*Follow-Up Message:*\n```{{ $json.follow_up_body }}```"
+              }
+            },
+            {
+              "type": "actions",
+              "elementsUi": {
+                "elementsValues": [
+                  {
+                    "type": "button",
+                    "text": "Send Follow-Up",
+                    "style": "primary",
+                    "actionId": "approve_{{ $json.reply_id }}"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Skip",
+                    "style": "danger",
+                    "actionId": "reject_{{ $json.reply_id }}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "name": "Send Follow-Up to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1250, 250],
+      "credentials": {
+        "slackApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Slack Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [{ "node": "Get Pending Follow-Ups", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Pending Follow-Ups": {
+      "main": [
+        [{ "node": "Any Follow-Ups?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Any Follow-Ups?": {
+      "main": [
+        [{ "node": "Split Items", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Split Items": {
+      "main": [
+        [{ "node": "Generate Follow-Up", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Follow-Up": {
+      "main": [
+        [{ "node": "Send Follow-Up to Slack", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

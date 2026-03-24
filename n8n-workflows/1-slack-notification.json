@@ -1,0 +1,123 @@
+{
+  "name": "1 - Slack Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-notify",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "pending_approval"
+            }
+          ]
+        }
+      },
+      "name": "Needs Approval?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#inbox-manager",
+        "text": "",
+        "blocksUi": {
+          "blocksValues": [
+            {
+              "type": "section",
+              "textUi": {
+                "text": "*New Reply from {{ $json.lead_email }}*\n*Campaign:* {{ $json.campaign_name }}\n*Category:* {{ $json.category }}\n*Received:* {{ $json.received_at }}"
+              }
+            },
+            {
+              "type": "section",
+              "textUi": {
+                "text": "*Their Reply:*\n> {{ $json.reply_body }}"
+              }
+            },
+            {
+              "type": "section",
+              "textUi": {
+                "text": "*AI Draft Response:*\n```{{ $json.draft_response }}```"
+              }
+            },
+            {
+              "type": "actions",
+              "elementsUi": {
+                "elementsValues": [
+                  {
+                    "type": "button",
+                    "text": "Approve & Send",
+                    "style": "primary",
+                    "actionId": "approve_{{ $json.reply_id }}"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Reject",
+                    "style": "danger",
+                    "actionId": "reject_{{ $json.reply_id }}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "name": "Send to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [650, 250],
+      "credentials": {
+        "slackApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Slack Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#inbox-manager",
+        "text": "Auto-handled reply from {{ $json.lead_email }} ({{ $json.category }}) - Campaign: {{ $json.campaign_name }}"
+      },
+      "name": "Log Auto-Handled",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [650, 450],
+      "credentials": {
+        "slackApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Slack Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Needs Approval?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Needs Approval?": {
+      "main": [
+        [{ "node": "Send to Slack", "type": "main", "index": 0 }],
+        [{ "node": "Log Auto-Handled", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

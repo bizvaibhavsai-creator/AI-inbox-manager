@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./playbook.md:/app/playbook.md:ro
+      - ./followups.md:/app/followups.md:ro
+      - db_data:/app/data
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=sqlite:///./data/inbox_manager.db
+      - PLAYBOOK_PATH=/app/playbook.md
+      - FOLLOWUPS_PATH=/app/followups.md
+      - N8N_SLACK_WEBHOOK_URL=http://n8n:5678/webhook/slack-notify
+      - N8N_BASE_URL=http://n8n:5678
+    depends_on:
+      - n8n
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678}
+      - N8N_HOST=0.0.0.0
+      - N8N_PROTOCOL=http
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        - NEXT_PUBLIC_API_URL=${BACKEND_PUBLIC_URL:-http://localhost:8888}
+    ports:
+      - "8080:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  n8n_data:

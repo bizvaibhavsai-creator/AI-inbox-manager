@@ -1,0 +1,129 @@
+{
+  "name": "2 - Slack Approval Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-interaction",
+        "responseMode": "onReceived"
+      },
+      "name": "Slack Interaction Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "notes": "Configure Slack app Interactivity URL to point here: http://YOUR_N8N_URL/webhook/slack-interaction"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "action_id",
+              "value": "={{ $json.body.actions[0].action_id }}"
+            },
+            {
+              "name": "action_type",
+              "value": "={{ $json.body.actions[0].action_id.split('_')[0] }}"
+            },
+            {
+              "name": "reply_id",
+              "value": "={{ $json.body.actions[0].action_id.split('_')[1] }}"
+            },
+            {
+              "name": "user",
+              "value": "={{ $json.body.user.name }}"
+            }
+          ]
+        }
+      },
+      "name": "Extract Action",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.action_type }}",
+              "operation": "equals",
+              "value2": "approve"
+            }
+          ]
+        }
+      },
+      "name": "Approve or Reject?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8888/api/send-reply",
+        "jsonParameters": true,
+        "body": "={{ JSON.stringify({ reply_id: parseInt($json.reply_id), approved_by: $json.user }) }}"
+      },
+      "name": "Send Reply via Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "http://backend:8888/api/replies/{{ $json.reply_id }}?status=rejected"
+      },
+      "name": "Reject Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "CONFIGURE_YOUR_SHEET_ID",
+        "range": "Sheet1",
+        "columns": "Timestamp,Lead Email,Campaign,Category,Response,Status,Approved By",
+        "values": "={{ new Date().toISOString() }},={{ $node['Extract Action'].json.lead_email || '' }},={{ $json.campaign_name || '' }},={{ $json.category || '' }},={{ $json.draft_response || '' }},=Sent,={{ $json.user }}"
+      },
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1050, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURE_ME",
+          "name": "Google Sheets Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Slack Interaction Webhook": {
+      "main": [
+        [{ "node": "Extract Action", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Action": {
+      "main": [
+        [{ "node": "Approve or Reject?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Approve or Reject?": {
+      "main": [
+        [{ "node": "Send Reply via Backend", "type": "main", "index": 0 }],
+        [{ "node": "Reject Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Reply via Backend": {
+      "main": [
+        [{ "node": "Log to Google Sheets", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
