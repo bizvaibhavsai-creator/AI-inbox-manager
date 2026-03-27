@@ -55,6 +55,28 @@ Write a response that:
 
 Write ONLY the email body text. No subject line, no greeting prefix like "Hi [Name]" unless the playbook specifies it."""
 
+REVISE_DRAFT_PROMPT = """You are a B2B cold email expert revising a draft response based on user feedback.
+
+MESSAGING PLAYBOOK:
+{playbook}
+
+CONTEXT:
+- Lead email: {lead_email}
+- Campaign: {campaign_name}
+- Their reply category: {category}
+- Their original reply: {reply_body}
+- Current draft response: {current_draft}
+
+USER FEEDBACK:
+{feedback}
+
+Revise the draft response incorporating the feedback above. Keep the same general intent but adjust based on what the user asked for.
+- Stay concise (2-4 sentences max)
+- Match the playbook tone
+- Feel human and personalized
+
+Write ONLY the revised email body text. No subject line, no explanations."""
+
 FOLLOWUP_PROMPT = """You are a B2B cold email expert writing a follow-up message.
 
 FOLLOW-UP TEMPLATES:
@@ -206,6 +228,44 @@ async def generate_followup(
         ],
         temperature=0.7,
         max_tokens=200,
+    )
+    return response.choices[0].message.content.strip()
+
+
+async def revise_draft(
+    reply_body: str,
+    lead_email: str,
+    campaign_name: str,
+    category: str,
+    current_draft: str,
+    feedback: str,
+) -> str:
+    """Revise a draft response based on user feedback."""
+    if not client or settings.test_mode:
+        return f"[Revised based on feedback: '{feedback}'] {current_draft}"
+
+    playbook = _load_file(settings.playbook_path)
+    if not playbook:
+        playbook = "(No playbook provided - use professional B2B sales best practices)"
+
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "user",
+                "content": REVISE_DRAFT_PROMPT.format(
+                    playbook=playbook,
+                    lead_email=lead_email,
+                    campaign_name=campaign_name,
+                    category=category,
+                    reply_body=reply_body,
+                    current_draft=current_draft,
+                    feedback=feedback,
+                ),
+            }
+        ],
+        temperature=0.7,
+        max_tokens=300,
     )
     return response.choices[0].message.content.strip()
 

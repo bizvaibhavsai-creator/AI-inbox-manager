@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlmodel import Session, SQLModel, create_engine, func, select
 
-from ai_service import classify_reply, generate_draft, generate_followup
+from ai_service import classify_reply, generate_draft, generate_followup, revise_draft
 from config import settings
 from models import Campaign, FollowUp, Reply
 
@@ -66,6 +66,10 @@ class SendReplyRequest(BaseModel):
     reply_id: int
     custom_response: Optional[str] = None  # If operator edited the draft
     approved_by: str = "slack_user"
+
+
+class FeedbackRequest(BaseModel):
+    feedback: str
 
 
 class GenerateFollowUpRequest(BaseModel):
@@ -346,6 +350,60 @@ async def generate_followup_endpoint(request: GenerateFollowUpRequest):
             "campaign_name": reply.campaign_name,
             "follow_up_body": body,
             "day_window": day_window,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Feedback on AI draft (called from dashboard)
+# ---------------------------------------------------------------------------
+@app.post("/api/replies/{reply_id}/feedback")
+async def submit_feedback(reply_id: int, request: FeedbackRequest):
+    """Revise the AI draft based on user feedback."""
+    with get_session() as session:
+        reply = session.get(Reply, reply_id)
+        if not reply:
+            raise HTTPException(status_code=404, detail="Reply not found")
+
+        revised = await revise_draft(
+            reply_body=reply.reply_body,
+            lead_email=reply.lead_email,
+            campaign_name=reply.campaign_name,
+            category=reply.category,
+            current_draft=reply.draft_response,
+            feedback=request.feedback,
+        )
+
+        reply.draft_response = revised
+        session.add(reply)
+        session.commit()
+
+        return {
+            "reply_id": reply_id,
+            "draft_response": revised,
+            "status": "revised",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Get single reply with full text
+# ---------------------------------------------------------------------------
+@app.get("/api/replies/{reply_id}")
+async def get_reply(reply_id: int):
+    """Get a single reply with full text (not truncated)."""
+    with get_session() as session:
+        reply = session.get(Reply, reply_id)
+        if not reply:
+            raise HTTPException(status_code=404, detail="Reply not found")
+        return {
+            "id": reply.id,
+            "lead_email": reply.lead_email,
+            "campaign_name": reply.campaign_name,
+            "category": reply.category,
+            "status": reply.status,
+            "reply_body": reply.reply_body,
+            "draft_response": reply.draft_response,
+            "received_at": reply.received_at.isoformat(),
+            "sent_at": reply.sent_at.isoformat() if reply.sent_at else None,
         }
 
 

@@ -118,3 +118,20 @@ export function getReplies(
   if (status) params.set("status", status);
   return fetchAPI(`/api/replies?${params}`);
 }
+
+export function getReplyDetail(replyId: number): Promise<ReplyItem> {
+  return fetchAPI(`/api/replies/${replyId}`);
+}
+
+export interface FeedbackResponse {
+  reply_id: number;
+  draft_response: string;
+  status: string;
+}
+
+export function submitFeedback(replyId: number, feedback: string): Promise<FeedbackResponse> {
+  return fetchAPI(`/api/replies/${replyId}/feedback`, {
+    method: "POST",
+    body: JSON.stringify({ feedback }),
+  });
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getReplies, type ReplyItem } from "@/lib/api";
+import { getReplies, submitFeedback, type ReplyItem } from "@/lib/api";
 
 const categoryStyles: Record<string, { bg: string; color: string; label: string }> = {
   interested: { bg: "#eef2ff", color: "#3366FF", label: "Interested" },
@@ -30,6 +30,11 @@ export default function RepliesPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackHistory, setFeedbackHistory] = useState<
+    { feedback: string; revisedDraft: string }[]
+  >([]);
 
   useEffect(() => {
     async function load() {
@@ -51,6 +56,35 @@ export default function RepliesPage() {
     }
     load();
   }, [page, categoryFilter, statusFilter]);
+
+  // Reset feedback state when selecting a different reply
+  useEffect(() => {
+    setFeedbackText("");
+    setFeedbackHistory([]);
+  }, [selectedId]);
+
+  async function handleFeedbackSubmit() {
+    if (!feedbackText.trim() || !selectedId) return;
+    setFeedbackLoading(true);
+    try {
+      const result = await submitFeedback(selectedId, feedbackText.trim());
+      setFeedbackHistory((prev) => [
+        ...prev,
+        { feedback: feedbackText.trim(), revisedDraft: result.draft_response },
+      ]);
+      // Update the reply in the list so the latest draft is shown
+      setReplies((prev) =>
+        prev.map((r) =>
+          r.id === selectedId ? { ...r, draft_response: result.draft_response } : r
+        )
+      );
+      setFeedbackText("");
+    } catch {
+      // handle error silently
+    } finally {
+      setFeedbackLoading(false);
+    }
+  }
 
   const selectedReply = replies.find((r) => r.id === selectedId);
 
@@ -352,6 +386,63 @@ export default function RepliesPage() {
               </div>
             )}
 
+            {/* Feedback history — previous revisions */}
+            {feedbackHistory.map((item, idx) => (
+              <div key={idx} className="mt-6">
+                {/* User feedback bubble */}
+                <div className="mb-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <div
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                      style={{ backgroundColor: "#16a34a" }}
+                    >
+                      You
+                    </div>
+                    <span className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
+                      Your Feedback
+                    </span>
+                  </div>
+                  <div
+                    className="ml-9 rounded-xl p-4"
+                    style={{ backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}
+                  >
+                    <p className="text-[13px] leading-relaxed" style={{ color: "#166534" }}>
+                      {item.feedback}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Revised AI draft */}
+                <div>
+                  <div className="mb-2 flex items-center gap-2">
+                    <div
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold"
+                      style={{ backgroundColor: "#eef2ff", color: "#3366FF" }}
+                    >
+                      AI
+                    </div>
+                    <span className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
+                      Revised Draft
+                    </span>
+                    <span
+                      className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                      style={{ backgroundColor: "#f0fdf4", color: "#16a34a" }}
+                    >
+                      v{idx + 2}
+                    </span>
+                  </div>
+                  <div
+                    className="ml-9 rounded-xl p-4"
+                    style={{ backgroundColor: "#f0f4ff", border: "1px solid #dde4f8" }}
+                  >
+                    <p className="text-[13px] leading-relaxed" style={{ color: "#2d3a6e" }}>
+                      {item.revisedDraft}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+
             {/* Sent timestamp */}
             {selectedReply.sent_at && (
               <div className="mt-6 flex items-center gap-2">
@@ -369,15 +460,53 @@ export default function RepliesPage() {
             )}
           </div>
 
-          {/* Bottom info bar */}
-          <div
-            className="flex items-center gap-4 px-6 py-3"
-            style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
-          >
-            <span className="text-[11px]" style={{ color: "#a5abbe" }}>
-              Reply managed via Slack approval workflow
-            </span>
-          </div>
+          {/* Feedback input */}
+          {selectedReply.draft_response && selectedReply.status !== "sent" && (
+            <div
+              className="flex items-center gap-3 px-6 py-3"
+              style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
+            >
+              <input
+                type="text"
+                value={feedbackText}
+                onChange={(e) => setFeedbackText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !feedbackLoading) handleFeedbackSubmit();
+                }}
+                placeholder="Give feedback on this draft... (e.g. make it shorter, add pricing)"
+                disabled={feedbackLoading}
+                className="flex-1 rounded-lg px-3 py-2 text-[13px] outline-none disabled:opacity-50"
+                style={{ border: "1px solid #e2e6ee", color: "#1a1a2e" }}
+              />
+              <button
+                onClick={handleFeedbackSubmit}
+                disabled={feedbackLoading || !feedbackText.trim()}
+                className="shrink-0 rounded-lg px-4 py-2 text-[12px] font-semibold text-white transition-opacity disabled:opacity-40"
+                style={{ backgroundColor: "#3366FF" }}
+              >
+                {feedbackLoading ? (
+                  <div
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-white"
+                    style={{ borderTopColor: "transparent" }}
+                  />
+                ) : (
+                  "Revise"
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Bottom info bar — shown when sent or no draft */}
+          {(selectedReply.status === "sent" || !selectedReply.draft_response) && (
+            <div
+              className="flex items-center gap-4 px-6 py-3"
+              style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
+            >
+              <span className="text-[11px]" style={{ color: "#a5abbe" }}>
+                Reply managed via Slack approval workflow
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
