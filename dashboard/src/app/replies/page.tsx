@@ -504,23 +504,23 @@ export default function RepliesPage() {
             selectedReply.status !== "rejected" &&
             selectedReply.status !== "auto_handled" && (
             <div
-              className="flex items-center gap-3 px-6 py-3"
+              className="flex items-center gap-2 px-6 py-3"
               style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
             >
               <button
                 onClick={handleApprove}
                 disabled={approveLoading || rejectLoading}
-                className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold text-white transition-opacity disabled:opacity-50"
-                style={{ backgroundColor: "#16a34a" }}
+                className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-semibold transition-opacity disabled:opacity-50"
+                style={{ backgroundColor: "#eef2ff", color: "#3366FF", border: "1px solid #dde4f8", minWidth: "130px" }}
               >
                 {approveLoading ? (
                   <div
-                    className="h-4 w-4 animate-spin rounded-full border-2 border-white"
+                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#3366FF]"
                     style={{ borderTopColor: "transparent" }}
                   />
                 ) : (
                   <>
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                     Approve & Send
@@ -530,17 +530,17 @@ export default function RepliesPage() {
               <button
                 onClick={handleReject}
                 disabled={approveLoading || rejectLoading}
-                className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold transition-opacity disabled:opacity-50"
-                style={{ backgroundColor: "#fef2f2", color: "#ef4444", border: "1px solid #fecaca" }}
+                className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-semibold transition-opacity disabled:opacity-50"
+                style={{ backgroundColor: "#fef2f2", color: "#ef4444", border: "1px solid #fecaca", minWidth: "130px" }}
               >
                 {rejectLoading ? (
                   <div
-                    className="h-4 w-4 animate-spin rounded-full border-2 border-[#ef4444]"
+                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#ef4444]"
                     style={{ borderTopColor: "transparent" }}
                   />
                 ) : (
                   <>
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                     Reject
