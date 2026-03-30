@@ -135,3 +135,18 @@ export function submitFeedback(replyId: number, feedback: string): Promise<Feedb
     body: JSON.stringify({ feedback }),
   });
 }
+
+export interface ApproveResponse {
+  status: string;
+  reply_id: number;
+  lead_email: string;
+  sent_at: string;
+}
+
+export function approveReply(replyId: number): Promise<ApproveResponse> {
+  return fetchAPI(`/api/replies/${replyId}/approve`, { method: "POST" });
+}
+
+export function rejectReply(replyId: number): Promise<{ status: string; reply_id: number }> {
+  return fetchAPI(`/api/replies/${replyId}/reject`, { method: "POST" });
+}

@@ -354,6 +354,111 @@ async def generate_followup_endpoint(request: GenerateFollowUpRequest):
 
 
 # ---------------------------------------------------------------------------
+# Approve & send reply from dashboard
+# ---------------------------------------------------------------------------
+@app.post("/api/replies/{reply_id}/approve")
+async def approve_reply_from_dashboard(reply_id: int):
+    """Approve and send a reply from the dashboard (same as Slack approval)."""
+    with get_session() as session:
+        reply = session.get(Reply, reply_id)
+        if not reply:
+            raise HTTPException(status_code=404, detail="Reply not found")
+        if reply.status == "sent":
+            raise HTTPException(status_code=400, detail="Reply already sent")
+        if not reply.draft_response:
+            raise HTTPException(status_code=400, detail="No draft response to send")
+
+        # Send via Instantly.ai API v2
+        try:
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.post(
+                    f"{settings.instantly_api_base}/emails/reply",
+                    headers={
+                        "Authorization": f"Bearer {settings.instantly_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "reply_to_uuid": reply.instantly_uuid,
+                        "body": reply.draft_response,
+                    },
+                    timeout=15.0,
+                )
+                resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Instantly API error: {e.response.text}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Instantly API error: {e.response.status_code}",
+            )
+        except Exception as e:
+            logger.error(f"Failed to send reply via Instantly: {e}")
+            raise HTTPException(status_code=502, detail="Failed to send reply")
+
+        # Update status
+        reply.status = "sent"
+        reply.approved_at = datetime.utcnow()
+        reply.sent_at = datetime.utcnow()
+        reply.approved_by = "dashboard"
+        session.add(reply)
+        session.commit()
+        session.refresh(reply)
+
+        logger.info(f"Reply {reply_id} approved & sent from dashboard")
+
+        # Schedule follow-ups
+        _schedule_followups(session, reply)
+
+        # Notify Slack about the approval
+        try:
+            async with httpx.AsyncClient() as http_client:
+                await http_client.post(
+                    settings.n8n_slack_webhook_url,
+                    json={
+                        "reply_id": reply.id,
+                        "lead_email": reply.lead_email,
+                        "campaign_name": reply.campaign_name,
+                        "category": reply.category,
+                        "reply_body": reply.reply_body,
+                        "draft_response": reply.draft_response,
+                        "status": "sent",
+                        "approved_by": "dashboard",
+                        "received_at": reply.received_at.isoformat(),
+                    },
+                    timeout=10.0,
+                )
+        except Exception as e:
+            logger.error(f"Failed to notify Slack: {e}")
+
+        return {
+            "status": "sent",
+            "reply_id": reply.id,
+            "lead_email": reply.lead_email,
+            "sent_at": reply.sent_at.isoformat(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Reject reply from dashboard
+# ---------------------------------------------------------------------------
+@app.post("/api/replies/{reply_id}/reject")
+async def reject_reply_from_dashboard(reply_id: int):
+    """Reject a reply from the dashboard."""
+    with get_session() as session:
+        reply = session.get(Reply, reply_id)
+        if not reply:
+            raise HTTPException(status_code=404, detail="Reply not found")
+        if reply.status == "sent":
+            raise HTTPException(status_code=400, detail="Reply already sent")
+
+        reply.status = "rejected"
+        session.add(reply)
+        session.commit()
+
+        logger.info(f"Reply {reply_id} rejected from dashboard")
+        return {"status": "rejected", "reply_id": reply.id}
+
+
+# ---------------------------------------------------------------------------
 # Feedback on AI draft (called from dashboard)
 # ---------------------------------------------------------------------------
 @app.post("/api/replies/{reply_id}/feedback")

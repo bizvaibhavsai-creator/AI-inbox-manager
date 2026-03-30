@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getReplies, submitFeedback, type ReplyItem } from "@/lib/api";
+import { getReplies, submitFeedback, approveReply, rejectReply, type ReplyItem } from "@/lib/api";
 
 const categoryStyles: Record<string, { bg: string; color: string; label: string }> = {
   interested: { bg: "#eef2ff", color: "#3366FF", label: "Interested" },
@@ -35,6 +35,8 @@ export default function RepliesPage() {
   const [feedbackHistory, setFeedbackHistory] = useState<
     { feedback: string; revisedDraft: string }[]
   >([]);
+  const [approveLoading, setApproveLoading] = useState(false);
+  const [rejectLoading, setRejectLoading] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -62,6 +64,42 @@ export default function RepliesPage() {
     setFeedbackText("");
     setFeedbackHistory([]);
   }, [selectedId]);
+
+  async function handleApprove() {
+    if (!selectedId) return;
+    setApproveLoading(true);
+    try {
+      const result = await approveReply(selectedId);
+      setReplies((prev) =>
+        prev.map((r) =>
+          r.id === selectedId
+            ? { ...r, status: "sent", sent_at: result.sent_at }
+            : r
+        )
+      );
+    } catch {
+      // handle error silently
+    } finally {
+      setApproveLoading(false);
+    }
+  }
+
+  async function handleReject() {
+    if (!selectedId) return;
+    setRejectLoading(true);
+    try {
+      await rejectReply(selectedId);
+      setReplies((prev) =>
+        prev.map((r) =>
+          r.id === selectedId ? { ...r, status: "rejected" } : r
+        )
+      );
+    } catch {
+      // handle error silently
+    } finally {
+      setRejectLoading(false);
+    }
+  }
 
   async function handleFeedbackSubmit() {
     if (!feedbackText.trim() || !selectedId) return;
@@ -460,8 +498,63 @@ export default function RepliesPage() {
             )}
           </div>
 
+          {/* Approve / Reject buttons */}
+          {selectedReply.draft_response &&
+            selectedReply.status !== "sent" &&
+            selectedReply.status !== "rejected" &&
+            selectedReply.status !== "auto_handled" && (
+            <div
+              className="flex items-center gap-3 px-6 py-3"
+              style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
+            >
+              <button
+                onClick={handleApprove}
+                disabled={approveLoading || rejectLoading}
+                className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold text-white transition-opacity disabled:opacity-50"
+                style={{ backgroundColor: "#16a34a" }}
+              >
+                {approveLoading ? (
+                  <div
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-white"
+                    style={{ borderTopColor: "transparent" }}
+                  />
+                ) : (
+                  <>
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Approve & Send
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleReject}
+                disabled={approveLoading || rejectLoading}
+                className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold transition-opacity disabled:opacity-50"
+                style={{ backgroundColor: "#fef2f2", color: "#ef4444", border: "1px solid #fecaca" }}
+              >
+                {rejectLoading ? (
+                  <div
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-[#ef4444]"
+                    style={{ borderTopColor: "transparent" }}
+                  />
+                ) : (
+                  <>
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Reject
+                  </>
+                )}
+              </button>
+              <span className="ml-auto text-[11px]" style={{ color: "#a5abbe" }}>
+                Sends reply via Instantly.ai & notifies Slack
+              </span>
+            </div>
+          )}
+
           {/* Feedback input */}
-          {selectedReply.draft_response && selectedReply.status !== "sent" && (
+          {selectedReply.draft_response && selectedReply.status !== "sent" && selectedReply.status !== "rejected" && (
             <div
               className="flex items-center gap-3 px-6 py-3"
               style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
