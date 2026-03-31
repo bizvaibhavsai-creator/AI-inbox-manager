@@ -852,8 +852,8 @@ async def list_replies(
                     "campaign_name": r.campaign_name,
                     "category": r.category,
                     "status": r.status,
-                    "reply_body": r.reply_body[:200],  # Truncate for list view
-                    "draft_response": r.draft_response[:200] if r.draft_response else "",
+                    "reply_body": r.reply_body,
+                    "draft_response": r.draft_response or "",
                     "received_at": r.received_at.isoformat(),
                     "sent_at": r.sent_at.isoformat() if r.sent_at else None,
                 }
