@@ -10,7 +10,7 @@ from sqlmodel import Session, SQLModel, create_engine, func, select
 
 from ai_service import classify_reply, generate_draft, generate_followup, revise_draft
 from config import settings
-from models import Campaign, FollowUp, Reply
+from models import AppSettings, Campaign, FollowUp, Reply
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -39,6 +39,44 @@ def on_startup():
 
 def get_session():
     return Session(engine)
+
+
+# ---------------------------------------------------------------------------
+# Settings endpoints
+# ---------------------------------------------------------------------------
+@app.get("/api/settings")
+async def get_settings():
+    """Get current app settings."""
+    with get_session() as session:
+        settings_row = session.get(AppSettings, 1)
+        if not settings_row:
+            settings_row = AppSettings(id=1, approval_mode="human")
+            session.add(settings_row)
+            session.commit()
+            session.refresh(settings_row)
+        return {"approval_mode": settings_row.approval_mode}
+
+
+class UpdateSettingsRequest(BaseModel):
+    approval_mode: str  # "human" or "automated"
+
+
+@app.put("/api/settings")
+async def update_settings(request: UpdateSettingsRequest):
+    """Update app settings."""
+    if request.approval_mode not in ("human", "automated"):
+        raise HTTPException(status_code=400, detail="approval_mode must be 'human' or 'automated'")
+    with get_session() as session:
+        settings_row = session.get(AppSettings, 1)
+        if not settings_row:
+            settings_row = AppSettings(id=1, approval_mode=request.approval_mode)
+            session.add(settings_row)
+        else:
+            settings_row.approval_mode = request.approval_mode
+            session.add(settings_row)
+        session.commit()
+        logger.info(f"Approval mode changed to: {request.approval_mode}")
+        return {"approval_mode": request.approval_mode}
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +190,11 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
     if category in ("interested", "info_request", "not_interested"):
         draft = await generate_draft(reply_body, lead_email, campaign_name, category)
 
+    # Check approval mode
+    with get_session() as session:
+        settings_row = session.get(AppSettings, 1)
+        approval_mode = settings_row.approval_mode if settings_row else "human"
+
     # Update reply record
     with get_session() as session:
         reply = session.get(Reply, reply_id)
@@ -160,12 +203,47 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
 
         if category in ("ooo", "unsubscribe", "dnc", "wrong_person"):
             reply.status = "auto_handled"
+        elif approval_mode == "automated" and draft:
+            # Auto-send: send via Instantly immediately
+            reply.status = "sent"
+            reply.approved_at = datetime.utcnow()
+            reply.sent_at = datetime.utcnow()
+            reply.approved_by = "auto"
         else:
             reply.status = "pending_approval"
 
         session.add(reply)
         session.commit()
         session.refresh(reply)
+
+        # If automated mode and actionable, send via Instantly
+        if reply.status == "sent" and approval_mode == "automated":
+            try:
+                async with httpx.AsyncClient() as http_client:
+                    resp = await http_client.post(
+                        f"{settings.instantly_api_base}/emails/reply",
+                        headers={
+                            "Authorization": f"Bearer {settings.instantly_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "reply_to_uuid": reply.instantly_uuid,
+                            "body": reply.draft_response,
+                        },
+                        timeout=15.0,
+                    )
+                    resp.raise_for_status()
+                logger.info(f"Auto-sent reply {reply_id} via Instantly")
+                _schedule_followups(session, reply)
+            except Exception as e:
+                logger.error(f"Auto-send failed for {reply_id}: {e}")
+                reply.status = "pending_approval"
+                reply.sent_at = None
+                reply.approved_at = None
+                reply.approved_by = ""
+                session.add(reply)
+                session.commit()
+                session.refresh(reply)
 
         # Prepare data for n8n
         n8n_payload = {
@@ -191,7 +269,6 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
         logger.info(f"Forwarded reply {reply_id} to n8n")
     except Exception as e:
         logger.error(f"Failed to forward to n8n: {e}")
-        # Don't fail the webhook - data is saved, n8n can be retried
 
     return {"status": "processed", "reply_id": reply_id, "category": category}
 

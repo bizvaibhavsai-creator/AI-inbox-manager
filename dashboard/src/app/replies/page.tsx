@@ -404,13 +404,17 @@ export default function RepliesPage() {
                     AI
                   </div>
                   <span className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
-                    AI Draft Response
+                    {selectedReply.status === "sent" ? "Sent Response" : "AI Draft Response"}
                   </span>
                   <span
                     className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
-                    style={{ backgroundColor: "#fffbeb", color: "#d97706" }}
+                    style={
+                      selectedReply.status === "sent"
+                        ? { backgroundColor: "#f0fdf4", color: "#16a34a" }
+                        : { backgroundColor: "#fffbeb", color: "#d97706" }
+                    }
                   >
-                    Draft
+                    {selectedReply.status === "sent" ? "Sent" : "Draft"}
                   </span>
                 </div>
                 <div

@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { getSettings, updateSettings } from "@/lib/api";
 
 const navItems = [
   {
@@ -35,6 +37,27 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [mode, setMode] = useState<"human" | "automated">("human");
+  const [toggling, setToggling] = useState(false);
+
+  useEffect(() => {
+    getSettings()
+      .then((s) => setMode(s.approval_mode as "human" | "automated"))
+      .catch(() => {});
+  }, []);
+
+  async function handleToggle() {
+    const newMode = mode === "human" ? "automated" : "human";
+    setToggling(true);
+    try {
+      await updateSettings(newMode);
+      setMode(newMode);
+    } catch {
+      // revert silently
+    } finally {
+      setToggling(false);
+    }
+  }
 
   return (
     <aside className="fixed left-0 top-0 flex h-screen w-60 flex-col bg-white" style={{ borderRight: "1px solid #e2e6ee" }}>
@@ -77,6 +100,40 @@ export default function Sidebar() {
           );
         })}
       </nav>
+
+      {/* Approval mode toggle */}
+      <div className="mx-3 mb-4 rounded-xl p-4" style={{ backgroundColor: "#f8f9fc", border: "1px solid #e2e6ee" }}>
+        <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest" style={{ color: "#b0b7c8" }}>
+          Approval Mode
+        </p>
+        <button
+          onClick={handleToggle}
+          disabled={toggling}
+          className="flex w-full items-center gap-3 disabled:opacity-60"
+        >
+          {/* Toggle track */}
+          <div
+            className="relative h-[22px] w-[40px] shrink-0 rounded-full transition-colors"
+            style={{ backgroundColor: mode === "automated" ? "#3366FF" : "#d1d5db" }}
+          >
+            <div
+              className="absolute top-[3px] h-[16px] w-[16px] rounded-full bg-white transition-all"
+              style={{
+                left: mode === "automated" ? "21px" : "3px",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
+              }}
+            />
+          </div>
+          <div className="text-left">
+            <p className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
+              {mode === "human" ? "Human Review" : "Automated"}
+            </p>
+            <p className="text-[10px]" style={{ color: "#a5abbe" }}>
+              {mode === "human" ? "Slack approval required" : "Auto-sends replies"}
+            </p>
+          </div>
+        </button>
+      </div>
 
       <div className="px-6 py-5" style={{ borderTop: "1px solid #e2e6ee" }}>
         <p className="text-[11px] font-medium" style={{ color: "#b0b7c8" }}>v1.0 &middot; Powered by AI</p>

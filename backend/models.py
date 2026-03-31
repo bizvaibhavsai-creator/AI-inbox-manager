@@ -4,6 +4,13 @@ from typing import Optional
 from sqlmodel import Field, Relationship, SQLModel
 
 
+class AppSettings(SQLModel, table=True):
+    __tablename__ = "app_settings"
+
+    id: int = Field(default=1, primary_key=True)
+    approval_mode: str = "human"  # "human" or "automated"
+
+
 class Campaign(SQLModel, table=True):
     __tablename__ = "campaigns"
 

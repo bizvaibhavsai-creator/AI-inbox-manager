@@ -150,3 +150,18 @@ export function approveReply(replyId: number): Promise<ApproveResponse> {
 export function rejectReply(replyId: number): Promise<{ status: string; reply_id: number }> {
   return fetchAPI(`/api/replies/${replyId}/reject`, { method: "POST" });
 }
+
+export interface AppSettingsResponse {
+  approval_mode: string;
+}
+
+export function getSettings(): Promise<AppSettingsResponse> {
+  return fetchAPI("/api/settings");
+}
+
+export function updateSettings(approval_mode: string): Promise<AppSettingsResponse> {
+  return fetchAPI("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ approval_mode }),
+  });
+}
