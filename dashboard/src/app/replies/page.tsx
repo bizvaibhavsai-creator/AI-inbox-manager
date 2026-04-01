@@ -3,6 +3,24 @@
 import { useEffect, useState } from "react";
 import { getReplies, submitFeedback, approveReply, rejectReply, getReplyThread, type ReplyItem, type ThreadEmail } from "@/lib/api";
 
+function stripHtml(html: string): string {
+  if (!html) return "";
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 const categoryStyles: Record<string, { bg: string; color: string; label: string }> = {
   interested: { bg: "#eef2ff", color: "#3366FF", label: "Interested" },
   not_interested: { bg: "#fef2f2", color: "#ef4444", label: "Not Interested" },
@@ -435,8 +453,8 @@ export default function RepliesPage() {
                             : { backgroundColor: "#f8f9fc", border: "1px solid #eef1f6" }
                         }
                       >
-                        <p className="text-[13px] leading-relaxed" style={{ color: isSent ? "#166534" : "#3d4254" }}>
-                          {email.body || email.content_preview || "(No content)"}
+                        <p className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: isSent ? "#166534" : "#3d4254" }}>
+                          {stripHtml(email.body || email.content_preview || "(No content)")}
                         </p>
                       </div>
                     </div>
