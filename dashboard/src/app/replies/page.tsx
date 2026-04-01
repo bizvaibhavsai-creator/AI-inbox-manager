@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getReplies, submitFeedback, approveReply, rejectReply, type ReplyItem } from "@/lib/api";
+import { getReplies, submitFeedback, approveReply, rejectReply, getReplyThread, type ReplyItem, type ThreadEmail } from "@/lib/api";
 
 const categoryStyles: Record<string, { bg: string; color: string; label: string }> = {
   interested: { bg: "#eef2ff", color: "#3366FF", label: "Interested" },
@@ -37,6 +37,8 @@ export default function RepliesPage() {
   >([]);
   const [approveLoading, setApproveLoading] = useState(false);
   const [rejectLoading, setRejectLoading] = useState(false);
+  const [thread, setThread] = useState<ThreadEmail[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -59,10 +61,18 @@ export default function RepliesPage() {
     load();
   }, [page, categoryFilter, statusFilter]);
 
-  // Reset feedback state when selecting a different reply
+  // Reset feedback state and fetch thread when selecting a different reply
   useEffect(() => {
     setFeedbackText("");
     setFeedbackHistory([]);
+    setThread([]);
+    if (selectedId) {
+      setThreadLoading(true);
+      getReplyThread(selectedId)
+        .then((data) => setThread(data.thread))
+        .catch(() => {})
+        .finally(() => setThreadLoading(false));
+    }
   }, [selectedId]);
 
   async function handleApprove() {
@@ -363,75 +373,187 @@ export default function RepliesPage() {
 
           {/* Conversation thread */}
           <div className="flex-1 overflow-y-auto px-6 py-5">
-            {/* Their reply */}
-            <div className="mb-6">
-              <div className="mb-2 flex items-center gap-2">
+            {threadLoading ? (
+              <div className="flex h-20 items-center justify-center">
                 <div
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white"
-                  style={{ backgroundColor: "#3366FF" }}
-                >
-                  {selectedReply.lead_email.charAt(0).toUpperCase()}
-                </div>
-                <span className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
-                  {selectedReply.lead_email}
-                </span>
-                <span className="text-[11px]" style={{ color: "#a5abbe" }}>
-                  {new Date(selectedReply.received_at).toLocaleTimeString("en-US", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                    hour12: true,
-                  })}
+                  className="h-5 w-5 animate-spin rounded-full border-[2.5px] border-[#e2e6ee]"
+                  style={{ borderTopColor: "#3366FF" }}
+                />
+                <span className="ml-3 text-[12px]" style={{ color: "#a5abbe" }}>
+                  Loading conversation...
                 </span>
               </div>
-              <div
-                className="ml-9 rounded-xl p-4"
-                style={{ backgroundColor: "#f8f9fc", border: "1px solid #eef1f6" }}
-              >
-                <p className="text-[13px] leading-relaxed" style={{ color: "#3d4254" }}>
-                  {selectedReply.reply_body}
-                </p>
-              </div>
-            </div>
+            ) : thread.length > 0 ? (
+              <>
+                {/* Full thread from Instantly.ai */}
+                {thread.map((email, idx) => {
+                  const isSent = email.type === "sent";
+                  return (
+                    <div key={email.id || idx} className="mb-6">
+                      <div className="mb-2 flex items-center gap-2">
+                        <div
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                          style={{ backgroundColor: isSent ? "#16a34a" : "#3366FF" }}
+                        >
+                          {isSent ? (
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : (
+                            (email.from || selectedReply.lead_email).charAt(0).toUpperCase()
+                          )}
+                        </div>
+                        <span className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
+                          {isSent ? "You" : (email.from || selectedReply.lead_email)}
+                        </span>
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                          style={
+                            isSent
+                              ? { backgroundColor: "#f0fdf4", color: "#16a34a" }
+                              : { backgroundColor: "#eef2ff", color: "#3366FF" }
+                          }
+                        >
+                          {isSent ? "Sent" : "Received"}
+                        </span>
+                        {email.timestamp && (
+                          <span className="text-[11px]" style={{ color: "#a5abbe" }}>
+                            {new Date(email.timestamp).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              hour: "numeric",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className="ml-9 rounded-xl p-4"
+                        style={
+                          isSent
+                            ? { backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }
+                            : { backgroundColor: "#f8f9fc", border: "1px solid #eef1f6" }
+                        }
+                      >
+                        <p className="text-[13px] leading-relaxed" style={{ color: isSent ? "#166534" : "#3d4254" }}>
+                          {email.body || email.content_preview || "(No content)"}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
 
-            {/* AI Draft response */}
-            {selectedReply.draft_response && (
-              <div>
-                <div className="mb-2 flex items-center gap-2">
-                  <div
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold"
-                    style={{ backgroundColor: "#eef2ff", color: "#3366FF" }}
-                  >
-                    AI
+                {/* AI Draft — show below thread if pending */}
+                {selectedReply.draft_response && selectedReply.status !== "sent" && (
+                  <div className="mb-6">
+                    <div className="mt-4 flex items-center gap-2">
+                      <div className="h-px flex-1" style={{ backgroundColor: "#e2e6ee" }} />
+                      <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "#a5abbe" }}>
+                        AI Draft
+                      </span>
+                      <div className="h-px flex-1" style={{ backgroundColor: "#e2e6ee" }} />
+                    </div>
+                    <div className="mt-4">
+                      <div className="mb-2 flex items-center gap-2">
+                        <div
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold"
+                          style={{ backgroundColor: "#eef2ff", color: "#3366FF" }}
+                        >
+                          AI
+                        </div>
+                        <span className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
+                          AI Draft Response
+                        </span>
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                          style={{ backgroundColor: "#fffbeb", color: "#d97706" }}
+                        >
+                          Draft
+                        </span>
+                      </div>
+                      <div
+                        className="ml-9 rounded-xl p-4"
+                        style={{ backgroundColor: "#f0f4ff", border: "1px solid #dde4f8" }}
+                      >
+                        <p className="text-[13px] leading-relaxed" style={{ color: "#2d3a6e" }}>
+                          {selectedReply.draft_response}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <span className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
-                    {selectedReply.status === "sent" ? "Sent Response" : "AI Draft Response"}
-                  </span>
-                  <span
-                    className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
-                    style={
-                      selectedReply.status === "sent"
-                        ? { backgroundColor: "#f0fdf4", color: "#16a34a" }
-                        : { backgroundColor: "#fffbeb", color: "#d97706" }
-                    }
+                )}
+              </>
+            ) : (
+              <>
+                {/* Fallback: show single reply + draft if thread fetch failed */}
+                <div className="mb-6">
+                  <div className="mb-2 flex items-center gap-2">
+                    <div
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                      style={{ backgroundColor: "#3366FF" }}
+                    >
+                      {selectedReply.lead_email.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
+                      {selectedReply.lead_email}
+                    </span>
+                    <span className="text-[11px]" style={{ color: "#a5abbe" }}>
+                      {new Date(selectedReply.received_at).toLocaleTimeString("en-US", {
+                        hour: "numeric",
+                        minute: "2-digit",
+                        hour12: true,
+                      })}
+                    </span>
+                  </div>
+                  <div
+                    className="ml-9 rounded-xl p-4"
+                    style={{ backgroundColor: "#f8f9fc", border: "1px solid #eef1f6" }}
                   >
-                    {selectedReply.status === "sent" ? "Sent" : "Draft"}
-                  </span>
+                    <p className="text-[13px] leading-relaxed" style={{ color: "#3d4254" }}>
+                      {selectedReply.reply_body}
+                    </p>
+                  </div>
                 </div>
-                <div
-                  className="ml-9 rounded-xl p-4"
-                  style={{ backgroundColor: "#f0f4ff", border: "1px solid #dde4f8" }}
-                >
-                  <p className="text-[13px] leading-relaxed" style={{ color: "#2d3a6e" }}>
-                    {selectedReply.draft_response}
-                  </p>
-                </div>
-              </div>
+
+                {selectedReply.draft_response && (
+                  <div>
+                    <div className="mb-2 flex items-center gap-2">
+                      <div
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold"
+                        style={{ backgroundColor: "#eef2ff", color: "#3366FF" }}
+                      >
+                        AI
+                      </div>
+                      <span className="text-[12px] font-semibold" style={{ color: "#1a1a2e" }}>
+                        {selectedReply.status === "sent" ? "Sent Response" : "AI Draft Response"}
+                      </span>
+                      <span
+                        className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                        style={
+                          selectedReply.status === "sent"
+                            ? { backgroundColor: "#f0fdf4", color: "#16a34a" }
+                            : { backgroundColor: "#fffbeb", color: "#d97706" }
+                        }
+                      >
+                        {selectedReply.status === "sent" ? "Sent" : "Draft"}
+                      </span>
+                    </div>
+                    <div
+                      className="ml-9 rounded-xl p-4"
+                      style={{ backgroundColor: "#f0f4ff", border: "1px solid #dde4f8" }}
+                    >
+                      <p className="text-[13px] leading-relaxed" style={{ color: "#2d3a6e" }}>
+                        {selectedReply.draft_response}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Feedback history — previous revisions */}
             {feedbackHistory.map((item, idx) => (
               <div key={idx} className="mt-6">
-                {/* User feedback bubble */}
                 <div className="mb-4">
                   <div className="mb-2 flex items-center gap-2">
                     <div
@@ -453,8 +575,6 @@ export default function RepliesPage() {
                     </p>
                   </div>
                 </div>
-
-                {/* Revised AI draft */}
                 <div>
                   <div className="mb-2 flex items-center gap-2">
                     <div

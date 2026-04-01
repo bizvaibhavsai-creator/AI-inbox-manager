@@ -867,6 +867,68 @@ async def list_replies(
 
 
 # ---------------------------------------------------------------------------
+# Fetch full conversation thread from Instantly.ai
+# ---------------------------------------------------------------------------
+@app.get("/api/replies/{reply_id}/thread")
+async def get_reply_thread(reply_id: int):
+    """Fetch the full email conversation thread from Instantly.ai."""
+    with get_session() as session:
+        reply = session.get(Reply, reply_id)
+        if not reply:
+            raise HTTPException(status_code=404, detail="Reply not found")
+
+    # Fetch thread from Instantly using lead email
+    try:
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.get(
+                f"{settings.instantly_api_base}/emails",
+                headers={
+                    "Authorization": f"Bearer {settings.instantly_api_key}",
+                },
+                params={
+                    "lead": reply.lead_email,
+                    "sort_order": "asc",
+                    "limit": 50,
+                },
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        logger.error(f"Failed to fetch thread from Instantly: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch conversation from Instantly")
+
+    # Format the thread
+    thread = []
+    for email in data.get("items", []):
+        body_text = ""
+        body_data = email.get("body", {})
+        if isinstance(body_data, dict):
+            body_text = body_data.get("text", "") or body_data.get("html", "")
+        elif isinstance(body_data, str):
+            body_text = body_data
+
+        thread.append({
+            "id": email.get("id", ""),
+            "from": email.get("from_address_email", ""),
+            "to": email.get("to_address_email_list", ""),
+            "subject": email.get("subject", ""),
+            "body": body_text,
+            "timestamp": email.get("timestamp_email", email.get("timestamp_created", "")),
+            "type": "sent" if email.get("ue_type") in (1, 3) else "received",
+            "content_preview": email.get("content_preview", ""),
+        })
+
+    return {
+        "reply_id": reply_id,
+        "lead_email": reply.lead_email,
+        "campaign_name": reply.campaign_name,
+        "thread": thread,
+        "count": len(thread),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Update reply status (called by n8n on reject)
 # ---------------------------------------------------------------------------
 @app.patch("/api/replies/{reply_id}")

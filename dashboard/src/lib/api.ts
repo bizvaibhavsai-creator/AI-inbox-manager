@@ -151,6 +151,29 @@ export function rejectReply(replyId: number): Promise<{ status: string; reply_id
   return fetchAPI(`/api/replies/${replyId}/reject`, { method: "POST" });
 }
 
+export interface ThreadEmail {
+  id: string;
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  timestamp: string;
+  type: "sent" | "received";
+  content_preview: string;
+}
+
+export interface ThreadResponse {
+  reply_id: number;
+  lead_email: string;
+  campaign_name: string;
+  thread: ThreadEmail[];
+  count: number;
+}
+
+export function getReplyThread(replyId: number): Promise<ThreadResponse> {
+  return fetchAPI(`/api/replies/${replyId}/thread`);
+}
+
 export interface AppSettingsResponse {
   approval_mode: string;
 }
