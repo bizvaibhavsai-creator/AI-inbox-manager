@@ -55,6 +55,7 @@ export default function RepliesPage() {
   >([]);
   const [approveLoading, setApproveLoading] = useState(false);
   const [rejectLoading, setRejectLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
   const [thread, setThread] = useState<ThreadEmail[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
 
@@ -84,6 +85,7 @@ export default function RepliesPage() {
     setFeedbackText("");
     setFeedbackHistory([]);
     setThread([]);
+    setActionError("");
     if (selectedId) {
       setThreadLoading(true);
       getReplyThread(selectedId)
@@ -96,6 +98,7 @@ export default function RepliesPage() {
   async function handleApprove() {
     if (!selectedId) return;
     setApproveLoading(true);
+    setActionError("");
     try {
       const result = await approveReply(selectedId);
       setReplies((prev) =>
@@ -105,8 +108,8 @@ export default function RepliesPage() {
             : r
         )
       );
-    } catch {
-      // handle error silently
+    } catch (err) {
+      setActionError("Failed to send reply. Check Instantly API key or try again.");
     } finally {
       setApproveLoading(false);
     }
@@ -639,6 +642,13 @@ export default function RepliesPage() {
               </div>
             )}
           </div>
+
+          {/* Error message */}
+          {actionError && (
+            <div className="px-6 py-2" style={{ backgroundColor: "#fef2f2", borderTop: "1px solid #fecaca" }}>
+              <p className="text-[12px] font-medium" style={{ color: "#ef4444" }}>{actionError}</p>
+            </div>
+          )}
 
           {/* Approve / Reject buttons */}
           {selectedReply.draft_response &&
