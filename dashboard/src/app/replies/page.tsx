@@ -493,7 +493,7 @@ export default function RepliesPage() {
                         className="ml-9 rounded-xl p-4"
                         style={{ backgroundColor: "#f0f4ff", border: "1px solid #dde4f8" }}
                       >
-                        <p className="text-[13px] leading-relaxed" style={{ color: "#2d3a6e" }}>
+                        <p className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: "#2d3a6e" }}>
                           {selectedReply.draft_response}
                         </p>
                       </div>
@@ -615,7 +615,7 @@ export default function RepliesPage() {
                     className="ml-9 rounded-xl p-4"
                     style={{ backgroundColor: "#f0f4ff", border: "1px solid #dde4f8" }}
                   >
-                    <p className="text-[13px] leading-relaxed" style={{ color: "#2d3a6e" }}>
+                    <p className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: "#2d3a6e" }}>
                       {item.revisedDraft}
                     </p>
                   </div>

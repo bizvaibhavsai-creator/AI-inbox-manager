@@ -18,7 +18,10 @@ CATEGORIES = [
 ]
 
 CLASSIFICATION_PROMPT = """You are an expert at classifying B2B cold email responses.
-Analyze the email reply below and classify it into exactly ONE of these categories:
+
+IMPORTANT: The email below may contain a quoted thread with multiple messages. You must identify which part is the PROSPECT'S LATEST REPLY and classify ONLY that. Ignore any quoted/forwarded messages from our side (the sender/sales team). Look for quoted text indicators like "On [date] [person] wrote:", ">" prefixes, or "From:" headers to distinguish the prospect's new message from the quoted thread.
+
+Classify the prospect's latest reply into exactly ONE of these categories:
 
 - interested: The prospect expresses interest, wants to learn more, asks for a call/demo, or gives a positive signal
 - not_interested: The prospect explicitly declines, says not a fit, or gives a clear negative response
@@ -44,16 +47,28 @@ CONTEXT:
 - Lead email: {lead_email}
 - Campaign: {campaign_name}
 - Their reply category: {category}
-- Their original reply: {reply_body}
+- Their original reply (may contain quoted thread - focus on the PROSPECT'S LATEST message only, ignore our previous outreach messages that appear in the quoted thread): {reply_body}
 
-Write a response that:
-1. Matches the playbook tone and style
-2. Is appropriate for the "{category}" category
-3. Is concise (2-4 sentences max)
-4. Feels human and personalized, not templated
-5. Includes a clear next step or CTA if appropriate
+FORMATTING RULES (CRITICAL - follow these exactly):
+1. Use proper line breaks between paragraphs. Each distinct thought should be on its own paragraph.
+2. Write like a real human texting a business contact. Keep it natural and conversational.
+3. DO NOT use special characters like em dashes, en dashes, or fancy punctuation. Use regular hyphens if needed.
+4. DO NOT overuse exclamation marks. Use them sparingly - max 1 per email, and only if it feels natural.
+5. Keep sentences short and punchy. No long run-on sentences.
+6. 2-4 short paragraphs max, separated by blank lines.
+7. End with a simple question or next step.
 
-Write ONLY the email body text. No subject line, no greeting prefix like "Hi [Name]" unless the playbook specifies it."""
+EXAMPLE FORMAT:
+Hey [Name]
+
+Great to hear from you. I'd love to set up a quick call to walk through how this works.
+
+Does sometime this week work for you? Happy to work around your schedule.
+
+Best,
+[Sender]
+
+Write ONLY the email body text. No subject line."""
 
 REVISE_DRAFT_PROMPT = """You are a B2B cold email expert revising a draft response based on user feedback.
 
@@ -71,9 +86,14 @@ USER FEEDBACK:
 {feedback}
 
 Revise the draft response incorporating the feedback above. Keep the same general intent but adjust based on what the user asked for.
-- Stay concise (2-4 sentences max)
-- Match the playbook tone
-- Feel human and personalized
+
+FORMATTING RULES (CRITICAL):
+1. Use proper line breaks between paragraphs. Each distinct thought on its own paragraph.
+2. Write like a real human. Natural and conversational.
+3. NO special characters like em dashes or en dashes. Use regular hyphens if needed.
+4. NO overuse of exclamation marks. Max 1 per email, only if natural.
+5. 2-4 short paragraphs, separated by blank lines.
+6. End with a simple question or next step.
 
 Write ONLY the revised email body text. No subject line, no explanations."""
 
