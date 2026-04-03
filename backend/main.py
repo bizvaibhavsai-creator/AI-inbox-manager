@@ -185,9 +185,30 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
     category = await classify_reply(reply_body)
     logger.info(f"Classified reply {reply_id} as: {category}")
 
-    # Generate draft response for actionable categories
+    # Check if a human already replied by looking at the Instantly thread
+    human_managed = False
+    try:
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.get(
+                f"{settings.instantly_api_base}/emails",
+                headers={"Authorization": f"Bearer {settings.instantly_api_key}"},
+                params={"lead": lead_email, "sort_order": "desc", "limit": 1},
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+            items = resp.json().get("items", [])
+            if items:
+                latest = items[0]
+                # ue_type 1=campaign sent, 3=manual/unibox sent
+                if latest.get("ue_type") in (1, 3):
+                    human_managed = True
+                    logger.info(f"Reply {reply_id} already handled by human - latest message is from us")
+    except Exception as e:
+        logger.warning(f"Could not check thread for {reply_id}: {e}")
+
+    # Generate draft response for actionable categories (skip if human already replied)
     draft = ""
-    if category in ("interested", "info_request"):
+    if not human_managed and category in ("interested", "info_request"):
         draft = await generate_draft(reply_body, lead_email, campaign_name, category)
 
     # Check approval mode
@@ -201,7 +222,9 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
         reply.category = category
         reply.draft_response = draft
 
-        if category in ("ooo", "unsubscribe", "dnc", "wrong_person", "not_interested"):
+        if human_managed:
+            reply.status = "human_managed"
+        elif category in ("ooo", "unsubscribe", "dnc", "wrong_person", "not_interested"):
             reply.status = "auto_handled"
         elif approval_mode == "automated" and draft:
             # Auto-send: send via Instantly immediately

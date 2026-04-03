@@ -37,6 +37,7 @@ const statusStyles: Record<string, { bg: string; color: string; label: string }>
   sent: { bg: "#f0fdf4", color: "#16a34a", label: "Sent" },
   rejected: { bg: "#fef2f2", color: "#ef4444", label: "Rejected" },
   auto_handled: { bg: "#f3f4f6", color: "#6b7280", label: "Auto" },
+  human_managed: { bg: "#eef2ff", color: "#6366f1", label: "Human" },
 };
 
 export default function RepliesPage() {
@@ -650,11 +651,30 @@ export default function RepliesPage() {
             </div>
           )}
 
+          {/* Managed by Human bar */}
+          {selectedReply.status === "human_managed" && (
+            <div
+              className="flex items-center gap-3 px-6 py-3"
+              style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#eef2ff" }}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="#6366f1" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              <span className="text-[12px] font-semibold" style={{ color: "#6366f1" }}>
+                Managed by Human
+              </span>
+              <span className="text-[11px]" style={{ color: "#a5abbe" }}>
+                A team member already replied to this conversation
+              </span>
+            </div>
+          )}
+
           {/* Approve / Reject buttons */}
           {selectedReply.draft_response &&
             selectedReply.status !== "sent" &&
             selectedReply.status !== "rejected" &&
-            selectedReply.status !== "auto_handled" && (
+            selectedReply.status !== "auto_handled" &&
+            selectedReply.status !== "human_managed" && (
             <div
               className="flex items-center gap-2 px-6 py-3"
               style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
@@ -706,7 +726,7 @@ export default function RepliesPage() {
           )}
 
           {/* Feedback input */}
-          {selectedReply.draft_response && selectedReply.status !== "sent" && selectedReply.status !== "rejected" && (
+          {selectedReply.draft_response && selectedReply.status !== "sent" && selectedReply.status !== "rejected" && selectedReply.status !== "human_managed" && (
             <div
               className="flex items-center gap-3 px-6 py-3"
               style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
@@ -742,7 +762,7 @@ export default function RepliesPage() {
           )}
 
           {/* Bottom info bar — shown when sent or no draft */}
-          {(selectedReply.status === "sent" || !selectedReply.draft_response) && (
+          {(selectedReply.status === "sent" || (!selectedReply.draft_response && selectedReply.status !== "human_managed")) && (
             <div
               className="flex items-center gap-4 px-6 py-3"
               style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
