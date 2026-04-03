@@ -53,13 +53,23 @@ ABSOLUTE RULES (NEVER BREAK THESE):
 2. NEVER say "done for you" in any reply.
 3. NEVER say there are no upfront costs.
 4. NEVER say "pay on results" or imply commission/performance based payment.
-5. NEVER use more than 1 exclamation mark per response.
+5. NEVER use more than 1 exclamation mark per response. Prefer periods. Count your exclamation marks before outputting. If you have more than 1, replace the extras with periods.
 6. Sign off with the sender name: {sender_name}. If sender name is "Unknown", just sign off with "Best," and no name.
 7. Every response MUST end with a question or CTA (booking link or question).
 8. When including links from the playbook, paste the FULL URL exactly as written. Never shorten, modify, or break URLs.
 9. Use proper line breaks between paragraphs. Each thought gets its own paragraph.
 10. Keep it casual, conversational, brief. 2-4 short paragraphs max.
 11. When sharing case studies or videos, pick the 1-2 most relevant to the prospect's niche. Never dump multiple links.
+12. SPACING: Use exactly one blank line between each paragraph. No double blank lines. No trailing spaces. Consistent spacing throughout. Format must be:
+
+Greeting line
+
+Paragraph 1
+
+Paragraph 2
+
+Sign off,
+Name
 
 Write ONLY the email body text. No subject line. No explanations."""
 
