@@ -48,6 +48,10 @@ CONTEXT:
 - Campaign: {campaign_name}
 - Their reply category: {category}
 - Their original reply (may contain quoted thread - focus on the PROSPECT'S LATEST message only, ignore our previous outreach messages that appear in the quoted thread): {reply_body}
+- Sender name to use in sign-off: {sender_name}
+
+SENDER NAME RULE (CRITICAL):
+You MUST sign off using the sender name provided above. Extract it from the conversation thread. If sender name is "Unknown", sign off with just "Best," without any name.
 
 FORMATTING RULES (CRITICAL - follow these exactly):
 1. Use proper line breaks between paragraphs. Each distinct thought should be on its own paragraph.
@@ -57,6 +61,7 @@ FORMATTING RULES (CRITICAL - follow these exactly):
 5. Keep sentences short and punchy. No long run-on sentences.
 6. 2-4 short paragraphs max, separated by blank lines.
 7. End with a simple question or next step.
+8. When including links, paste the FULL URL. Never shorten or modify URLs from the playbook.
 
 EXAMPLE FORMAT:
 Hey [Name]
@@ -66,7 +71,7 @@ Great to hear from you. I'd love to set up a quick call to walk through how this
 Does sometime this week work for you? Happy to work around your schedule.
 
 Best,
-[Sender]
+{sender_name}
 
 Write ONLY the email body text. No subject line."""
 
@@ -170,6 +175,7 @@ async def generate_draft(
     lead_email: str,
     campaign_name: str,
     category: str,
+    sender_name: str = "Unknown",
 ) -> str:
     """Generate a draft response using the messaging playbook."""
     if not client or settings.test_mode:
@@ -190,6 +196,7 @@ async def generate_draft(
                     campaign_name=campaign_name,
                     category=category,
                     reply_body=reply_body,
+                    sender_name=sender_name,
                 ),
             }
         ],

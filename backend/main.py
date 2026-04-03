@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -185,14 +186,15 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
     category = await classify_reply(reply_body)
     logger.info(f"Classified reply {reply_id} as: {category}")
 
-    # Check if a human already replied by looking at the Instantly thread
+    # Check thread: is the latest message from us? Extract sender name from our messages.
     human_managed = False
+    sender_name = "Unknown"
     try:
         async with httpx.AsyncClient() as http_client:
             resp = await http_client.get(
                 f"{settings.instantly_api_base}/emails",
                 headers={"Authorization": f"Bearer {settings.instantly_api_key}"},
-                params={"lead": lead_email, "sort_order": "desc", "limit": 1},
+                params={"lead": lead_email, "sort_order": "desc", "limit": 10},
                 timeout=10.0,
             )
             resp.raise_for_status()
@@ -203,13 +205,45 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
                 if latest.get("ue_type") in (1, 3):
                     human_managed = True
                     logger.info(f"Reply {reply_id} already handled by human - latest message is from us")
+
+                # Extract sender name from our sent messages
+                for item in items:
+                    if item.get("ue_type") in (1, 3):
+                        from_addr = item.get("from_address_email", "")
+                        # Try to get name from from_address_json first
+                        from_json = item.get("from_address_json", [])
+                        if from_json and isinstance(from_json, list) and len(from_json) > 0:
+                            name = from_json[0].get("name", "")
+                            if name:
+                                sender_name = name.split()[0]  # First name only
+                                break
+                        # Fallback: extract from email body sign-off
+                        body_data = item.get("body", {})
+                        body_text = ""
+                        if isinstance(body_data, dict):
+                            body_text = body_data.get("text", "") or body_data.get("html", "")
+                        elif isinstance(body_data, str):
+                            body_text = body_data
+                        # Look for common sign-off patterns
+                        signoff = re.search(r'(?:Best|Cheers|Thanks|Regards|Kind regards|Warm regards)[,\s]*\n\s*([A-Z][a-z]+)', body_text)
+                        if signoff:
+                            sender_name = signoff.group(1)
+                            break
+                        # Try from email address
+                        if from_addr and "@" in from_addr:
+                            name_part = from_addr.split("@")[0]
+                            # Convert "grace.smith" or "grace" to "Grace"
+                            sender_name = name_part.split(".")[0].title()
+                            break
     except Exception as e:
         logger.warning(f"Could not check thread for {reply_id}: {e}")
+
+    logger.info(f"Reply {reply_id}: sender_name={sender_name}, human_managed={human_managed}")
 
     # Generate draft response for actionable categories (skip if human already replied)
     draft = ""
     if not human_managed and category in ("interested", "info_request"):
-        draft = await generate_draft(reply_body, lead_email, campaign_name, category)
+        draft = await generate_draft(reply_body, lead_email, campaign_name, category, sender_name=sender_name)
 
     # Check approval mode
     with get_session() as session:
@@ -360,12 +394,14 @@ async def send_reply(request: SendReplyRequest):
 
 
 def _schedule_followups(session: Session, reply: Reply):
-    """Create follow-up records for 3, 5, 7 day windows."""
-    for i, days in enumerate(settings.followup_windows, start=1):
+    """Create follow-up records. Follow-up 1 at 2h, then every 24h up to 9 total."""
+    cumulative_hours = 0
+    for i, hours in enumerate(settings.followup_windows_hours, start=1):
+        cumulative_hours += hours
         followup = FollowUp(
             reply_id=reply.id,
             sequence_num=i,
-            scheduled_for=datetime.utcnow() + timedelta(days=days),
+            scheduled_for=datetime.utcnow() + timedelta(hours=cumulative_hours),
         )
         session.add(followup)
     session.commit()
@@ -389,7 +425,8 @@ async def get_pending_followups():
         for fu in followups:
             reply = session.get(Reply, fu.reply_id)
             # Only follow up if the original reply was sent and no new reply came in
-            if reply and reply.status in ("sent", "follow_up_1", "follow_up_2"):
+            valid_statuses = ("sent",) + tuple(f"follow_up_{i}" for i in range(1, 9))
+            if reply and reply.status in valid_statuses:
                 results.append({
                     "followup_id": fu.id,
                     "reply_id": fu.reply_id,
@@ -425,8 +462,10 @@ async def generate_followup_endpoint(request: GenerateFollowUpRequest):
             return {"status": "no_pending_followups"}
 
         now = datetime.utcnow()
-        days_since = (now - (reply.sent_at or reply.received_at)).days
-        day_window = settings.followup_windows[followup.sequence_num - 1]
+        hours_since = int((now - (reply.sent_at or reply.received_at)).total_seconds() / 3600)
+        days_since = hours_since // 24
+        hour_window = settings.followup_windows_hours[followup.sequence_num - 1] if followup.sequence_num <= len(settings.followup_windows_hours) else 24
+        day_window = hour_window // 24 if hour_window >= 24 else 0
 
         body = await generate_followup(
             lead_email=reply.lead_email,
@@ -813,7 +852,7 @@ async def stats_followups():
         pending = sum(1 for f in followups if f.status == "pending")
 
         by_sequence = {}
-        for seq in [1, 2, 3]:
+        for seq in range(1, 10):
             seq_followups = [f for f in followups if f.sequence_num == seq]
             seq_sent = sum(1 for f in seq_followups if f.status == "sent")
             by_sequence[f"followup_{seq}"] = {

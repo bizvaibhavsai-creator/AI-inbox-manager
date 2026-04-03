@@ -25,8 +25,9 @@ class Settings(BaseSettings):
     playbook_path: str = str(Path(__file__).parent.parent / "playbook.md")
     followups_path: str = str(Path(__file__).parent.parent / "followups.md")
 
-    # Follow-up windows (days)
-    followup_windows: list[int] = [3, 5, 7]
+    # Follow-up windows (hours)
+    # Follow-up 1: 2 hours, Follow-up 2: 24h, Follow-up 3-9: every 24h
+    followup_windows_hours: list[int] = [2, 24, 24, 24, 24, 24, 24, 24, 24]
 
     # API base URLs
     instantly_api_base: str = "https://api.instantly.ai/api/v2"
