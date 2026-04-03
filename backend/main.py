@@ -224,19 +224,41 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
                             body_text = body_data.get("text", "") or body_data.get("html", "")
                         elif isinstance(body_data, str):
                             body_text = body_data
-                        # Look for common sign-off patterns
-                        signoff = re.search(r'(?:Best|Cheers|Thanks|Regards|Kind regards|Warm regards)[,\s]*\n\s*([A-Z][a-z]+)', body_text)
+                        # Look for common sign-off patterns (with or without newlines)
+                        # Strip HTML tags first for better matching
+                        clean_text = re.sub(r'<[^>]+>', '\n', body_text)
+                        signoff = re.search(r'(?:Best|Cheers|Thanks|Regards|Kind regards|Warm regards|Best regards)[,\s]*[\n\r]+\s*([A-Z][a-z]+)', clean_text)
                         if signoff:
                             sender_name = signoff.group(1)
                             break
-                        # Try from email address
+                        # Also try "From: FirstName LastName" pattern in the thread
+                        from_header = re.search(r'From:\s*([A-Z][a-z]+)\s+[A-Z][a-z]+\s*<', body_text)
+                        if from_header:
+                            sender_name = from_header.group(1)
+                            break
+                        # Try from email address as last resort
                         if from_addr and "@" in from_addr:
                             name_part = from_addr.split("@")[0]
-                            # Convert "grace.smith" or "grace" to "Grace"
-                            sender_name = name_part.split(".")[0].title()
+                            # Handle "lewis.j" -> skip, "jessica" -> "Jessica", "grace.smith" -> "Grace"
+                            parts = name_part.split(".")
+                            # Use the longest part (likely the first name, not initial)
+                            best = max(parts, key=len)
+                            if len(best) > 1:
+                                sender_name = best.title()
                             break
     except Exception as e:
         logger.warning(f"Could not check thread for {reply_id}: {e}")
+
+    # Last resort: try to extract sender name from the prospect's reply body (quoted "From:" header)
+    if sender_name == "Unknown" or (sender_name and len(sender_name) <= 2):
+        from_match = re.search(r'From:\s*([A-Z][a-z]+)\s+[A-Z][a-z]+\s*<', reply_body)
+        if from_match:
+            sender_name = from_match.group(1)
+    # Also check for sign-off in the reply body's quoted section
+    if sender_name == "Unknown" or (sender_name and len(sender_name) <= 2):
+        signoff_match = re.search(r'(?:Best|Cheers|Thanks|Regards|Best regards)[,\s]*[\n\r]+\s*([A-Z][a-z]+)', reply_body)
+        if signoff_match:
+            sender_name = signoff_match.group(1)
 
     logger.info(f"Reply {reply_id}: sender_name={sender_name}, human_managed={human_managed}")
 

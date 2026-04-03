@@ -57,6 +57,7 @@ ABSOLUTE RULES (NEVER BREAK THESE):
 6. Sign off with the sender name: {sender_name}. If sender name is "Unknown", just sign off with "Best," and no name.
 7. Every response MUST end with a question or CTA (booking link or question).
 8. When including links from the playbook, paste the FULL URL exactly as written. Never shorten, modify, or break URLs.
+IMPORTANT: ALWAYS include the booking link https://msg.jkdagency.com/widget/bookings/jkdagencydiscoe in your response. Even if the prospect provides a phone number or suggests calling, redirect them to book via the link instead. The booking link is the primary CTA in every response.
 9. Use proper line breaks between paragraphs. Each thought gets its own paragraph.
 10. Keep it casual, conversational, brief. 2-4 short paragraphs max.
 11. When sharing case studies or videos, pick the 1-2 most relevant to the prospect's niche. Never dump multiple links.
@@ -134,7 +135,7 @@ async def classify_reply(reply_body: str) -> str:
         return _mock_classify(reply_body)
 
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=[
             {
                 "role": "user",
@@ -185,7 +186,7 @@ async def generate_draft(
         playbook = "(No playbook provided - use professional B2B sales best practices)"
 
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=[
             {
                 "role": "user",
@@ -236,7 +237,7 @@ async def generate_followup(
         )
 
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=[
             {
                 "role": "user",
@@ -275,7 +276,7 @@ async def revise_draft(
         playbook = "(No playbook provided - use professional B2B sales best practices)"
 
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=[
             {
                 "role": "user",
