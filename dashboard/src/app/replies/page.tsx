@@ -38,6 +38,7 @@ const statusStyles: Record<string, { bg: string; color: string; label: string }>
   rejected: { bg: "#fef2f2", color: "#ef4444", label: "Rejected" },
   auto_handled: { bg: "#f3f4f6", color: "#6b7280", label: "Auto" },
   human_managed: { bg: "#eef2ff", color: "#6366f1", label: "Human" },
+  needs_josh: { bg: "#fff7ed", color: "#ea580c", label: "Needs Josh" },
 };
 
 export default function RepliesPage() {
@@ -656,6 +657,24 @@ export default function RepliesPage() {
             </div>
           )}
 
+          {/* Needs Josh's Help bar */}
+          {selectedReply.status === "needs_josh" && (
+            <div
+              className="flex items-center gap-3 px-6 py-3"
+              style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fff7ed" }}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="#ea580c" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <span className="text-[12px] font-semibold" style={{ color: "#ea580c" }}>
+                Needs Josh's Help
+              </span>
+              <span className="text-[11px]" style={{ color: "#a5abbe" }}>
+                The AI could not confidently respond. Josh needs to reply manually.
+              </span>
+            </div>
+          )}
+
           {/* Managed by Human bar */}
           {selectedReply.status === "human_managed" && (
             <div
@@ -679,7 +698,8 @@ export default function RepliesPage() {
             selectedReply.status !== "sent" &&
             selectedReply.status !== "rejected" &&
             selectedReply.status !== "auto_handled" &&
-            selectedReply.status !== "human_managed" && (
+            selectedReply.status !== "human_managed" &&
+            selectedReply.status !== "needs_josh" && (
             <div
               className="flex items-center gap-2 px-6 py-3"
               style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
@@ -731,7 +751,7 @@ export default function RepliesPage() {
           )}
 
           {/* Feedback input */}
-          {selectedReply.draft_response && selectedReply.status !== "sent" && selectedReply.status !== "rejected" && selectedReply.status !== "human_managed" && (
+          {selectedReply.draft_response && selectedReply.status !== "sent" && selectedReply.status !== "rejected" && selectedReply.status !== "human_managed" && selectedReply.status !== "needs_josh" && (
             <div
               className="flex items-center gap-3 px-6 py-3"
               style={{ borderTop: "1px solid #e2e6ee", backgroundColor: "#fafbfd" }}
