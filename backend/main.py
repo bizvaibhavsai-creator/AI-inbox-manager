@@ -543,6 +543,32 @@ async def approve_reply_from_dashboard(reply_id: int):
         if not reply.draft_response:
             raise HTTPException(status_code=400, detail="No draft response to send")
 
+        # Fetch eaccount from Instantly if missing (for older replies)
+        if not reply.eaccount:
+            try:
+                async with httpx.AsyncClient() as http_client:
+                    thread_resp = await http_client.get(
+                        f"{settings.instantly_api_base}/emails",
+                        headers={"Authorization": f"Bearer {settings.instantly_api_key}"},
+                        params={"lead": reply.lead_email, "sort_order": "desc", "limit": 5},
+                        timeout=10.0,
+                    )
+                    thread_resp.raise_for_status()
+                    for item in thread_resp.json().get("items", []):
+                        if item.get("ue_type") in (1, 3):
+                            reply.eaccount = item.get("eaccount", "") or item.get("from_address_email", "")
+                            if reply.eaccount:
+                                session.add(reply)
+                                session.commit()
+                                session.refresh(reply)
+                                logger.info(f"Fetched eaccount for reply {reply_id}: {reply.eaccount}")
+                                break
+            except Exception as e:
+                logger.warning(f"Could not fetch eaccount for reply {reply_id}: {e}")
+
+        if not reply.eaccount:
+            raise HTTPException(status_code=400, detail="Cannot determine sending email account. Check Instantly thread.")
+
         # Send via Instantly.ai API v2
         instantly_sent = False
         try:
@@ -570,11 +596,10 @@ async def approve_reply_from_dashboard(reply_id: int):
                 instantly_sent = True
                 logger.info(f"Reply {reply_id} sent successfully via Instantly")
         except Exception as e:
-            logger.warning(f"Instantly API send failed for reply {reply_id}: {e}")
-            # Still mark as sent - the approval action should succeed even if
-            # Instantly delivery fails (e.g. test replies with fake UUIDs)
+            logger.error(f"Instantly API send failed for reply {reply_id}: {e}")
+            raise HTTPException(status_code=502, detail=f"Failed to send via Instantly: {str(e)}")
 
-        # Update status
+        # Update status only after successful send
         reply.status = "sent"
         reply.approved_at = datetime.utcnow()
         reply.sent_at = datetime.utcnow()
