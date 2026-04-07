@@ -186,9 +186,10 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
     category = await classify_reply(reply_body)
     logger.info(f"Classified reply {reply_id} as: {category}")
 
-    # Check thread: is the latest message from us? Extract sender name from our messages.
+    # Check thread: is the latest message from us? Extract sender name and eaccount.
     human_managed = False
     sender_name = "Unknown"
+    eaccount = ""
     try:
         async with httpx.AsyncClient() as http_client:
             resp = await http_client.get(
@@ -206,9 +207,11 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
                     human_managed = True
                     logger.info(f"Reply {reply_id} already handled by human - latest message is from us")
 
-                # Extract sender name from our sent messages
+                # Extract sender name and eaccount from our sent messages
                 for item in items:
                     if item.get("ue_type") in (1, 3):
+                        if not eaccount:
+                            eaccount = item.get("eaccount", "") or item.get("from_address_email", "")
                         from_addr = item.get("from_address_email", "")
                         # Try to get name from from_address_json first
                         from_json = item.get("from_address_json", [])
@@ -277,6 +280,7 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
         reply = session.get(Reply, reply_id)
         reply.category = category
         reply.draft_response = draft
+        reply.eaccount = eaccount
 
         if human_managed:
             reply.status = "human_managed"
@@ -307,7 +311,12 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
                         },
                         json={
                             "reply_to_uuid": reply.instantly_uuid,
-                            "body": reply.draft_response,
+                            "eaccount": reply.eaccount,
+                            "subject": f"Re: {reply.reply_subject}" if reply.reply_subject else "Re:",
+                            "body": {
+                                "html": reply.draft_response.replace("\n", "<br>"),
+                                "text": reply.draft_response,
+                            },
                         },
                         timeout=15.0,
                     )
@@ -378,7 +387,12 @@ async def send_reply(request: SendReplyRequest):
                     },
                     json={
                         "reply_to_uuid": reply.instantly_uuid,
-                        "body": response_body,
+                        "eaccount": reply.eaccount,
+                        "subject": f"Re: {reply.reply_subject}" if reply.reply_subject else "Re:",
+                        "body": {
+                            "html": response_body.replace("\n", "<br>"),
+                            "text": response_body,
+                        },
                     },
                     timeout=15.0,
                 )
@@ -533,20 +547,28 @@ async def approve_reply_from_dashboard(reply_id: int):
         instantly_sent = False
         try:
             async with httpx.AsyncClient() as http_client:
+                send_payload = {
+                    "reply_to_uuid": reply.instantly_uuid,
+                    "eaccount": reply.eaccount,
+                    "subject": f"Re: {reply.reply_subject}" if reply.reply_subject else "Re:",
+                    "body": {
+                        "html": reply.draft_response.replace("\n", "<br>"),
+                        "text": reply.draft_response,
+                    },
+                }
+                logger.info(f"Sending reply {reply_id} via Instantly: eaccount={reply.eaccount}, uuid={reply.instantly_uuid}")
                 resp = await http_client.post(
                     f"{settings.instantly_api_base}/emails/reply",
                     headers={
                         "Authorization": f"Bearer {settings.instantly_api_key}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "reply_to_uuid": reply.instantly_uuid,
-                        "body": reply.draft_response,
-                    },
+                    json=send_payload,
                     timeout=15.0,
                 )
                 resp.raise_for_status()
                 instantly_sent = True
+                logger.info(f"Reply {reply_id} sent successfully via Instantly")
         except Exception as e:
             logger.warning(f"Instantly API send failed for reply {reply_id}: {e}")
             # Still mark as sent - the approval action should succeed even if

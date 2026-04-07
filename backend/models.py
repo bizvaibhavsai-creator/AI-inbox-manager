@@ -31,6 +31,7 @@ class Reply(SQLModel, table=True):
     campaign_name: str = ""
     reply_body: str
     reply_subject: str = ""
+    eaccount: str = ""  # sending email account from Instantly
     category: str = ""  # interested|not_interested|ooo|unsubscribe|info_request|wrong_person|dnc
     draft_response: str = ""
     status: str = "pending_classification"

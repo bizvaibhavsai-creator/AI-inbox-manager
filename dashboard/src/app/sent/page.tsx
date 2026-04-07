@@ -140,6 +140,7 @@ export default function SentPage() {
                         ? new Date(r.sent_at).toLocaleDateString("en-US", {
                             month: "short",
                             day: "numeric",
+                            timeZone: "America/New_York",
                           })
                         : ""}
                     </p>
@@ -208,6 +209,7 @@ export default function SentPage() {
                   year: "numeric",
                   hour: "numeric",
                   minute: "2-digit",
+                  timeZone: "America/New_York",
                 })}
               </p>
             </div>
@@ -257,6 +259,7 @@ export default function SentPage() {
                     hour: "numeric",
                     minute: "2-digit",
                     hour12: true,
+                    timeZone: "America/New_York",
                   })}
                 </span>
               </div>
@@ -313,6 +316,7 @@ export default function SentPage() {
                     day: "numeric",
                     hour: "numeric",
                     minute: "2-digit",
+                    timeZone: "America/New_York",
                   })}
                 </span>
                 <div className="h-px flex-1" style={{ backgroundColor: "#e2e6ee" }} />

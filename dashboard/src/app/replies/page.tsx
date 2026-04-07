@@ -288,6 +288,7 @@ export default function RepliesPage() {
                         hour: "numeric",
                         minute: "2-digit",
                         hour12: true,
+                        timeZone: "America/New_York",
                       })}
                     </p>
                     {r.status !== "auto_handled" && (
@@ -360,6 +361,7 @@ export default function RepliesPage() {
                   year: "numeric",
                   hour: "numeric",
                   minute: "2-digit",
+                  timeZone: "America/New_York",
                 })}
               </p>
             </div>
@@ -445,6 +447,7 @@ export default function RepliesPage() {
                               day: "numeric",
                               hour: "numeric",
                               minute: "2-digit",
+                              timeZone: "America/New_York",
                             })}
                           </span>
                         )}
@@ -524,6 +527,7 @@ export default function RepliesPage() {
                         hour: "numeric",
                         minute: "2-digit",
                         hour12: true,
+                        timeZone: "America/New_York",
                       })}
                     </span>
                   </div>
@@ -637,6 +641,7 @@ export default function RepliesPage() {
                     day: "numeric",
                     hour: "numeric",
                     minute: "2-digit",
+                    timeZone: "America/New_York",
                   })}
                 </span>
                 <div className="h-px flex-1" style={{ backgroundColor: "#e2e6ee" }} />
