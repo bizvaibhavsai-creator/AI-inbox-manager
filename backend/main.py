@@ -42,6 +42,30 @@ def get_session():
     return Session(engine)
 
 
+def _plain_text_to_html(text: str) -> str:
+    """Convert plain text to HTML with clickable hyperlinks and line breaks.
+
+    Finds all http/https URLs and wraps them in <a> tags so they are
+    clickable in the prospect's email client (Instantly replies).
+    """
+    def _make_link(match: re.Match) -> str:
+        url = match.group(1)
+        # Strip trailing punctuation that is likely sentence-ending, not part of the URL
+        trailing = ""
+        while url and url[-1] in ".,;:!?)":
+            trailing = url[-1] + trailing
+            url = url[:-1]
+        return (
+            f'<a href="{url}" target="_blank" '
+            f'style="color: #3366FF; text-decoration: underline;">'
+            f"{url}</a>{trailing}"
+        )
+
+    html = re.sub(r"(https?://\S+)", _make_link, text)
+    html = html.replace("\n", "<br>")
+    return html
+
+
 # ---------------------------------------------------------------------------
 # Settings endpoints
 # ---------------------------------------------------------------------------
@@ -320,7 +344,7 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
                             "eaccount": reply.eaccount,
                             "subject": f"Re: {reply.reply_subject}" if reply.reply_subject else "Re:",
                             "body": {
-                                "html": reply.draft_response.replace("\n", "<br>"),
+                                "html": _plain_text_to_html(reply.draft_response),
                                 "text": reply.draft_response,
                             },
                         },
@@ -398,7 +422,7 @@ async def send_reply(request: SendReplyRequest):
                         "eaccount": reply.eaccount,
                         "subject": f"Re: {reply.reply_subject}" if reply.reply_subject else "Re:",
                         "body": {
-                            "html": response_body.replace("\n", "<br>"),
+                            "html": _plain_text_to_html(response_body),
                             "text": response_body,
                         },
                     },
@@ -588,7 +612,7 @@ async def approve_reply_from_dashboard(reply_id: int):
                     "eaccount": reply.eaccount,
                     "subject": f"Re: {reply.reply_subject}" if reply.reply_subject else "Re:",
                     "body": {
-                        "html": reply.draft_response.replace("\n", "<br>"),
+                        "html": _plain_text_to_html(reply.draft_response),
                         "text": reply.draft_response,
                     },
                 }
