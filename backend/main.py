@@ -373,7 +373,7 @@ async def receive_instantly_webhook(payload: InstantlyWebhookPayload):
             "reply_subject": reply.reply_subject,
             "draft_response": reply.draft_response,
             "status": reply.status,
-            "received_at": reply.received_at.isoformat(),
+            "received_at": reply.received_at.isoformat() + "Z",
         }
 
     # Forward to n8n for Slack notification
@@ -504,7 +504,7 @@ async def get_pending_followups():
                     "original_reply": reply.reply_body,
                     "last_response": reply.draft_response,
                     "days_since": (now - (reply.sent_at or reply.received_at)).days,
-                    "scheduled_for": fu.scheduled_for.isoformat(),
+                    "scheduled_for": fu.scheduled_for.isoformat() + "Z",
                 })
 
     return {"followups": results, "count": len(results)}
@@ -661,7 +661,7 @@ async def approve_reply_from_dashboard(reply_id: int):
                         "draft_response": reply.draft_response,
                         "status": "sent",
                         "approved_by": "dashboard",
-                        "received_at": reply.received_at.isoformat(),
+                        "received_at": reply.received_at.isoformat() + "Z",
                     },
                     timeout=10.0,
                 )
@@ -672,7 +672,7 @@ async def approve_reply_from_dashboard(reply_id: int):
             "status": "sent",
             "reply_id": reply.id,
             "lead_email": reply.lead_email,
-            "sent_at": reply.sent_at.isoformat(),
+            "sent_at": reply.sent_at.isoformat() + "Z",
             "instantly_sent": instantly_sent,
         }
 
@@ -747,8 +747,8 @@ async def get_reply(reply_id: int):
             "status": reply.status,
             "reply_body": reply.reply_body,
             "draft_response": reply.draft_response,
-            "received_at": reply.received_at.isoformat(),
-            "sent_at": reply.sent_at.isoformat() if reply.sent_at else None,
+            "received_at": reply.received_at.isoformat() + "Z",
+            "sent_at": (reply.sent_at.isoformat() + "Z") if reply.sent_at else None,
         }
 
 
@@ -1017,8 +1017,8 @@ async def list_replies(
                     "status": r.status,
                     "reply_body": r.reply_body,
                     "draft_response": r.draft_response or "",
-                    "received_at": r.received_at.isoformat(),
-                    "sent_at": r.sent_at.isoformat() if r.sent_at else None,
+                    "received_at": r.received_at.isoformat() + "Z",
+                    "sent_at": (r.sent_at.isoformat() + "Z") if r.sent_at else None,
                 }
                 for r in replies
             ],
@@ -1112,4 +1112,4 @@ async def update_reply(reply_id: int, status: str = Query(...)):
 # ---------------------------------------------------------------------------
 @app.get("/health")
 async def health():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat() + "Z"}

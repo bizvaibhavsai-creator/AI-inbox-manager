@@ -29,6 +29,7 @@ export default function TimelineChart({ data }: Props) {
     date: new Date(d.date).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
+      timeZone: "America/New_York",
     }),
   }));
 
