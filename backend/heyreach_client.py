@@ -112,7 +112,7 @@ async def get_conversations(
 ) -> Dict[str, Any]:
     """Fetch LinkedIn conversations from HeyReach inbox.
 
-    POST /inbox/GetConversations
+    POST /inbox/GetConversationsV2
     Returns: { "items": [...], "totalCount": N }
     """
     body: Dict[str, Any] = {"offset": offset, "limit": limit}
@@ -127,7 +127,7 @@ async def get_conversations(
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
-            f"{BASE_URL}/inbox/GetConversations",
+            f"{BASE_URL}/inbox/GetConversationsV2",
             headers=_headers(),
             json=body,
         )
@@ -141,16 +141,12 @@ async def get_conversation(
 ) -> Dict[str, Any]:
     """Fetch the full message thread for a single conversation.
 
-    GET /inbox/GetConversation?accountId={}&conversationId={}
+    GET /inbox/GetChatroom/{accountId}/{conversationId}
     """
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.get(
-            f"{BASE_URL}/inbox/GetConversation",
+            f"{BASE_URL}/inbox/GetChatroom/{account_id}/{conversation_id}",
             headers=_headers(),
-            params={
-                "accountId": account_id,
-                "conversationId": conversation_id,
-            },
         )
         response.raise_for_status()
         return response.json()
