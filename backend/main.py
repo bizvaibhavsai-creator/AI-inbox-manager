@@ -1250,11 +1250,11 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
     error_detail = None
     try:
         data = await heyreach_client.get_conversations(offset=0, limit=max_conversations)
-        logger.info("HeyReach GetConversationsV2 raw keys: %s | totalCount: %s | items count: %s",
-                    list(data.keys()) if isinstance(data, dict) else type(data),
-                    data.get("totalCount") if isinstance(data, dict) else "N/A",
-                    len(data.get("items", [])) if isinstance(data, dict) else 0)
         items = data.get("items", []) if isinstance(data, dict) else []
+        logger.info("HeyReach V2 totalCount: %s | items: %s | first item keys: %s",
+                    data.get("totalCount") if isinstance(data, dict) else "N/A",
+                    len(items),
+                    list(items[0].keys()) if items else "[]")
 
         with get_session() as session:
             for item in items:
