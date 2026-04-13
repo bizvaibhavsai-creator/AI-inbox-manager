@@ -49,6 +49,7 @@ export default function LinkedInInboxPage() {
   const [rejectLoading, setRejectLoading] = useState(false);
   const [actionError, setActionError] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
 
   useEffect(() => {
     setLoading(true);
@@ -78,15 +79,17 @@ export default function LinkedInInboxPage() {
 
   async function handleSync() {
     setSyncing(true);
+    setSyncMsg("");
     try {
-      await syncLinkedInConversations();
+      const result = await syncLinkedInConversations(200);
+      setSyncMsg(`Synced ${result.count} new conversations`);
       const data = await getLinkedInConversations(1, categoryFilter || undefined, statusFilter || undefined);
       setConversations(data.conversations);
       setTotalPages(data.pages);
       setTotal(data.total);
       setPage(1);
-    } catch {
-      // silent
+    } catch (err: unknown) {
+      setSyncMsg(`Sync failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setSyncing(false);
     }
@@ -209,6 +212,13 @@ export default function LinkedInInboxPage() {
           </div>
         </div>
 
+        {/* Sync status message */}
+        {syncMsg && conversations.length > 0 && (
+          <div className="px-5 py-2 text-[11px]" style={{ color: syncMsg.startsWith("Sync failed") ? "#ef4444" : "#16a34a", borderBottom: "1px solid #f0f2f7" }}>
+            {syncMsg}
+          </div>
+        )}
+
         {/* Conversation rows */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
@@ -220,7 +230,11 @@ export default function LinkedInInboxPage() {
             </div>
           ) : conversations.length === 0 ? (
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-[13px]" style={{ color: "#a5abbe" }}>
-              <span>No conversations found</span>
+              {syncMsg ? (
+                <span className="text-[12px]" style={{ color: syncMsg.startsWith("Sync failed") ? "#ef4444" : "#16a34a" }}>{syncMsg}</span>
+              ) : (
+                <span>No conversations found</span>
+              )}
               <button
                 onClick={handleSync}
                 className="rounded-lg px-4 py-2 text-[12px] font-semibold text-white"

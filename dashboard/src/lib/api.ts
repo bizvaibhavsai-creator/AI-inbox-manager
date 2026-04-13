@@ -272,8 +272,8 @@ export function getLinkedInCampaigns(): Promise<{ campaigns: LinkedInCampaign[];
   return fetchAPI("/api/linkedin/campaigns");
 }
 
-export function syncLinkedInConversations(): Promise<{ status: string; count: number }> {
-  return fetchAPI("/api/linkedin/conversations/sync", { method: "POST" });
+export function syncLinkedInConversations(maxConversations = 200): Promise<{ status: string; count: number; skipped: number }> {
+  return fetchAPI(`/api/linkedin/conversations/sync?max_conversations=${maxConversations}`, { method: "POST" });
 }
 
 export function getLinkedInConversations(

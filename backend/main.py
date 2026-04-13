@@ -1236,18 +1236,19 @@ async def sync_linkedin_campaigns():
 # ---------------------------------------------------------------------------
 
 @app.post("/api/linkedin/conversations/sync")
-async def sync_linkedin_conversations():
-    """Fetch conversations from HeyReach and store them — no AI calls here.
+async def sync_linkedin_conversations(max_conversations: int = Query(200, le=1000)):
+    """Fetch the most recent conversations from HeyReach and store them.
 
+    Capped at max_conversations (default 200) to keep sync fast.
     Classification and draft generation happen lazily when a conversation is opened.
-    This keeps the sync fast regardless of inbox size.
     """
     synced = 0
+    skipped = 0
     offset = 0
     limit = 50
 
     try:
-        while True:
+        while synced + skipped < max_conversations:
             data = await heyreach_client.get_conversations(offset=offset, limit=limit)
             items = data.get("items", []) if isinstance(data, dict) else []
             if not items:
@@ -1265,6 +1266,7 @@ async def sync_linkedin_conversations():
                         )
                     ).first()
                     if existing:
+                        skipped += 1
                         continue  # Already stored
 
                     account_id = str(item.get("accountId", ""))
@@ -1303,16 +1305,14 @@ async def sync_linkedin_conversations():
 
                 session.commit()
 
-            total_count = data.get("totalCount", 0)
             offset += limit
-            if offset >= total_count:
-                break
 
     except Exception as exc:
         logger.exception("Error syncing LinkedIn conversations")
         raise HTTPException(status_code=502, detail=f"HeyReach sync error: {exc}")
 
-    return {"status": "synced", "count": synced}
+    logger.info("LinkedIn conversation sync: %d new, %d already existed", synced, skipped)
+    return {"status": "synced", "count": synced, "skipped": skipped}
 
 
 @app.get("/api/linkedin/conversations")
