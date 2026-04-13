@@ -1236,7 +1236,7 @@ async def sync_linkedin_campaigns():
 # ---------------------------------------------------------------------------
 
 @app.post("/api/linkedin/conversations/sync")
-async def sync_linkedin_conversations(max_conversations: int = Query(200, le=1000)):
+async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000)):
     """Fetch the most recent conversations from HeyReach and store them.
 
     Capped at max_conversations (default 200) to keep sync fast.

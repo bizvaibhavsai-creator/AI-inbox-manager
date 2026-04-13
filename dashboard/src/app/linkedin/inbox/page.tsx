@@ -81,7 +81,7 @@ export default function LinkedInInboxPage() {
     setSyncing(true);
     setSyncMsg("");
     try {
-      const result = await syncLinkedInConversations(200);
+      const result = await syncLinkedInConversations(50);
       setSyncMsg(`Synced ${result.count} new conversations`);
       const data = await getLinkedInConversations(1, categoryFilter || undefined, statusFilter || undefined);
       setConversations(data.conversations);
