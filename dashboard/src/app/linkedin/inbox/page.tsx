@@ -82,7 +82,11 @@ export default function LinkedInInboxPage() {
     setSyncMsg("");
     try {
       const result = await syncLinkedInConversations(50);
-      setSyncMsg(`Synced ${result.count} new conversations`);
+      if (result.error) {
+        setSyncMsg(`Sync error: ${result.error}`);
+      } else {
+        setSyncMsg(`Synced ${result.count} new, ${result.skipped} already stored`);
+      }
       const data = await getLinkedInConversations(1, categoryFilter || undefined, statusFilter || undefined);
       setConversations(data.conversations);
       setTotalPages(data.pages);
