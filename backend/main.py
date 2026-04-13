@@ -1237,7 +1237,11 @@ async def sync_linkedin_campaigns():
 
 @app.post("/api/linkedin/conversations/sync")
 async def sync_linkedin_conversations():
-    """Fetch unprocessed conversations from HeyReach and classify them."""
+    """Fetch conversations from HeyReach and store them — no AI calls here.
+
+    Classification and draft generation happen lazily when a conversation is opened.
+    This keeps the sync fast regardless of inbox size.
+    """
     synced = 0
     offset = 0
     limit = 50
@@ -1261,7 +1265,7 @@ async def sync_linkedin_conversations():
                         )
                     ).first()
                     if existing:
-                        continue  # Already processed
+                        continue  # Already stored
 
                     account_id = str(item.get("accountId", ""))
                     heyreach_camp_id = str(item.get("campaignId", ""))
@@ -1278,24 +1282,7 @@ async def sync_linkedin_conversations():
                         )
                     ).first()
 
-                    # Classify the message
-                    category = await classify_linkedin_message(last_message)
-
-                    # Skip out_of_office and wrong_person for draft generation
-                    draft = ""
-                    if category in ("interested", "info_request", "referral"):
-                        campaign_name = local_campaign.name if local_campaign else ""
-                        draft = await generate_linkedin_draft(
-                            message=last_message,
-                            lead_name=lead_name,
-                            lead_title=lead_title,
-                            lead_company=lead_company,
-                            campaign_name=campaign_name,
-                            category=category,
-                        )
-
-                    status = "pending_approval" if draft else "auto_handled"
-
+                    # Store with pending_classification — AI runs when conversation is opened
                     conv = LinkedInConversation(
                         heyreach_conversation_id=conv_id,
                         account_id=account_id,
@@ -1306,9 +1293,9 @@ async def sync_linkedin_conversations():
                         lead_title=lead_title,
                         lead_company=lead_company,
                         last_message=last_message,
-                        category=category,
-                        draft_response=draft,
-                        status=status,
+                        category="",
+                        draft_response="",
+                        status="pending_classification",
                         created_at=datetime.utcnow(),
                     )
                     session.add(conv)
@@ -1380,11 +1367,42 @@ async def list_linkedin_conversations(
 
 @app.get("/api/linkedin/conversations/{conv_id}")
 async def get_linkedin_conversation(conv_id: int):
-    """Get a single LinkedIn conversation with its full thread from HeyReach."""
+    """Get a single LinkedIn conversation. Runs AI classification + draft on first open."""
     with get_session() as session:
         conv = session.get(LinkedInConversation, conv_id)
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Lazy classification: run AI the first time this conversation is opened
+        if conv.status == "pending_classification" and conv.last_message:
+            try:
+                category = await classify_linkedin_message(conv.last_message)
+                conv.category = category
+
+                campaign_name = ""
+                if conv.campaign_id:
+                    camp = session.get(LinkedInCampaign, conv.campaign_id)
+                    if camp:
+                        campaign_name = camp.name
+
+                draft = ""
+                if category in ("interested", "info_request", "referral"):
+                    draft = await generate_linkedin_draft(
+                        message=conv.last_message,
+                        lead_name=conv.lead_name,
+                        lead_title=conv.lead_title,
+                        lead_company=conv.lead_company,
+                        campaign_name=campaign_name,
+                        category=category,
+                    )
+
+                conv.draft_response = draft
+                conv.status = "pending_approval" if draft else "auto_handled"
+                session.add(conv)
+                session.commit()
+                session.refresh(conv)
+            except Exception as exc:
+                logger.warning("Lazy classification failed for conv %s: %s", conv_id, exc)
 
         # Fetch full thread from HeyReach
         thread = []

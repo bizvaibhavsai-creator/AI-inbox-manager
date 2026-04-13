@@ -23,6 +23,7 @@ const categoryStyles: Record<string, { bg: string; color: string; label: string 
 };
 
 const statusStyles: Record<string, { bg: string; color: string; label: string }> = {
+  pending_classification: { bg: "#f3f4f6", color: "#9ca3af", label: "New" },
   pending_approval: { bg: "#fff7ed", color: "#ea580c", label: "Pending" },
   approved: { bg: "#eef2ff", color: "#3366FF", label: "Approved" },
   sent: { bg: "#f0fdf4", color: "#16a34a", label: "Sent" },
