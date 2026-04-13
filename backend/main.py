@@ -1251,6 +1251,9 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
     try:
         data = await heyreach_client.get_conversations(offset=0, limit=max_conversations)
         items = data.get("items", []) if isinstance(data, dict) else []
+        if items:
+            profile = items[0].get("correspondentProfile") or {}
+            logger.info("V2 correspondentProfile keys+values: %s", dict(list(profile.items())[:12]))
 
         with get_session() as session:
             for item in items:
