@@ -1247,72 +1247,66 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
     offset = 0
     limit = 50
 
+    error_detail = None
     try:
-        while synced + skipped < max_conversations:
-            data = await heyreach_client.get_conversations(offset=offset, limit=limit)
-            items = data.get("items", []) if isinstance(data, dict) else []
-            if not items:
-                break
+        data = await heyreach_client.get_conversations(offset=0, limit=max_conversations)
+        items = data.get("items", []) if isinstance(data, dict) else []
 
-            with get_session() as session:
-                for item in items:
-                    conv_id = str(item.get("conversationId", ""))
-                    if not conv_id:
-                        continue
+        with get_session() as session:
+            for item in items:
+                conv_id = str(item.get("conversationId", ""))
+                if not conv_id:
+                    continue
 
-                    existing = session.exec(
-                        select(LinkedInConversation).where(
-                            LinkedInConversation.heyreach_conversation_id == conv_id
-                        )
-                    ).first()
-                    if existing:
-                        skipped += 1
-                        continue  # Already stored
-
-                    account_id = str(item.get("accountId", ""))
-                    heyreach_camp_id = str(item.get("campaignId", ""))
-                    last_message = item.get("lastMessage", "") or ""
-                    lead_name = item.get("leadName", "") or ""
-                    lead_url = item.get("leadLinkedInUrl", "") or ""
-                    lead_title = item.get("leadTitle", "") or ""
-                    lead_company = item.get("leadCompany", "") or ""
-
-                    # Look up local campaign
-                    local_campaign = session.exec(
-                        select(LinkedInCampaign).where(
-                            LinkedInCampaign.heyreach_campaign_id == heyreach_camp_id
-                        )
-                    ).first()
-
-                    # Store with pending_classification — AI runs when conversation is opened
-                    conv = LinkedInConversation(
-                        heyreach_conversation_id=conv_id,
-                        account_id=account_id,
-                        campaign_id=local_campaign.id if local_campaign else None,
-                        heyreach_campaign_id=heyreach_camp_id,
-                        lead_name=lead_name,
-                        lead_linkedin_url=lead_url,
-                        lead_title=lead_title,
-                        lead_company=lead_company,
-                        last_message=last_message,
-                        category="",
-                        draft_response="",
-                        status="pending_classification",
-                        created_at=datetime.utcnow(),
+                existing = session.exec(
+                    select(LinkedInConversation).where(
+                        LinkedInConversation.heyreach_conversation_id == conv_id
                     )
-                    session.add(conv)
-                    synced += 1
+                ).first()
+                if existing:
+                    skipped += 1
+                    continue
 
-                session.commit()
+                account_id = str(item.get("accountId", ""))
+                heyreach_camp_id = str(item.get("campaignId", ""))
+                last_message = item.get("lastMessage", "") or ""
+                lead_name = item.get("leadName", "") or ""
+                lead_url = item.get("leadLinkedInUrl", "") or ""
+                lead_title = item.get("leadTitle", "") or ""
+                lead_company = item.get("leadCompany", "") or ""
 
-            offset += limit
+                local_campaign = session.exec(
+                    select(LinkedInCampaign).where(
+                        LinkedInCampaign.heyreach_campaign_id == heyreach_camp_id
+                    )
+                ).first()
+
+                conv = LinkedInConversation(
+                    heyreach_conversation_id=conv_id,
+                    account_id=account_id,
+                    campaign_id=local_campaign.id if local_campaign else None,
+                    heyreach_campaign_id=heyreach_camp_id,
+                    lead_name=lead_name,
+                    lead_linkedin_url=lead_url,
+                    lead_title=lead_title,
+                    lead_company=lead_company,
+                    last_message=last_message,
+                    category="",
+                    draft_response="",
+                    status="pending_classification",
+                    created_at=datetime.utcnow(),
+                )
+                session.add(conv)
+                synced += 1
+
+            session.commit()
 
     except Exception as exc:
         logger.exception("Error syncing LinkedIn conversations")
-        raise HTTPException(status_code=502, detail=f"HeyReach sync error: {exc}")
+        error_detail = str(exc)
 
     logger.info("LinkedIn conversation sync: %d new, %d already existed", synced, skipped)
-    return {"status": "synced", "count": synced, "skipped": skipped}
+    return {"status": "synced", "count": synced, "skipped": skipped, "error": error_detail}
 
 
 @app.get("/api/linkedin/conversations")
