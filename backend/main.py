@@ -1251,9 +1251,6 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
     try:
         data = await heyreach_client.get_conversations(offset=0, limit=max_conversations)
         items = data.get("items", []) if isinstance(data, dict) else []
-        if items:
-            logger.info("HeyReach V2 first item keys: %s", list(items[0].keys()))
-            logger.info("HeyReach V2 first item sample: %s", {k: items[0].get(k) for k in list(items[0].keys())[:8]})
 
         with get_session() as session:
             for item in items:
@@ -1274,13 +1271,19 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
                     skipped += 1
                     continue
 
-                account_id = str(item.get("accountId") or item.get("account_id") or item.get("linkedInAccountId") or "")
-                heyreach_camp_id = str(item.get("campaignId") or item.get("campaign_id") or "")
-                last_message = item.get("lastMessage") or item.get("last_message") or item.get("message") or ""
-                lead_name = item.get("leadName") or item.get("lead_name") or item.get("name") or ""
-                lead_url = item.get("leadLinkedInUrl") or item.get("leadUrl") or item.get("profileUrl") or ""
-                lead_title = item.get("leadTitle") or item.get("lead_title") or item.get("title") or ""
-                lead_company = item.get("leadCompany") or item.get("lead_company") or item.get("company") or ""
+                # V2 field names (confirmed from API response)
+                account_id = str(item.get("linkedInAccountId") or item.get("accountId") or "")
+                heyreach_camp_id = str(item.get("campaignId") or "")
+                last_message = item.get("lastMessageText") or item.get("lastMessage") or ""
+
+                # Lead info is nested inside correspondentProfile in V2
+                profile = item.get("correspondentProfile") or {}
+                first = profile.get("firstName", "") or ""
+                last = profile.get("lastName", "") or ""
+                lead_name = profile.get("fullName") or profile.get("name") or f"{first} {last}".strip() or ""
+                lead_url = profile.get("profileUrl") or profile.get("linkedInUrl") or profile.get("url") or ""
+                lead_title = profile.get("headline") or profile.get("title") or profile.get("position") or ""
+                lead_company = profile.get("companyName") or profile.get("company") or ""
 
                 local_campaign = session.exec(
                     select(LinkedInCampaign).where(
@@ -1412,13 +1415,21 @@ async def get_linkedin_conversation(conv_id: int):
                 account_id=conv.account_id,
                 conversation_id=conv.heyreach_conversation_id,
             )
+            # V2: messages array with text/sentAt/senderType fields
             messages = raw.get("messages", raw.get("chatRoomMessages", []))
             for msg in messages:
-                thread.append({
-                    "content": msg.get("message", msg.get("content", "")),
-                    "sent_at": msg.get("sentAt", msg.get("timestamp", "")),
-                    "is_outgoing": msg.get("isOutgoing", False),
-                })
+                content = (msg.get("text") or msg.get("message") or
+                           msg.get("content") or msg.get("lastMessageText") or "")
+                sent_at = msg.get("sentAt") or msg.get("timestamp") or msg.get("createdAt") or ""
+                # senderType: "ME" = outgoing, anything else = incoming
+                sender = msg.get("senderType") or ""
+                is_outgoing = sender.upper() == "ME" or msg.get("isOutgoing", False)
+                if content:
+                    thread.append({
+                        "content": content,
+                        "sent_at": sent_at,
+                        "is_outgoing": is_outgoing,
+                    })
         except Exception as exc:
             logger.warning("Could not fetch HeyReach thread for conv %s: %s", conv_id, exc)
 
