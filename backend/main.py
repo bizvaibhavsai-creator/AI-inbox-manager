@@ -1251,15 +1251,18 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
     try:
         data = await heyreach_client.get_conversations(offset=0, limit=max_conversations)
         items = data.get("items", []) if isinstance(data, dict) else []
-        logger.info("HeyReach V2 totalCount: %s | items: %s | first item keys: %s",
-                    data.get("totalCount") if isinstance(data, dict) else "N/A",
-                    len(items),
-                    list(items[0].keys()) if items else "[]")
+        if items:
+            logger.info("HeyReach V2 first item keys: %s", list(items[0].keys()))
+            logger.info("HeyReach V2 first item sample: %s", {k: items[0].get(k) for k in list(items[0].keys())[:8]})
 
         with get_session() as session:
             for item in items:
-                conv_id = str(item.get("conversationId", ""))
-                if not conv_id:
+                # V2 may use different field names — try all known variants
+                conv_id = str(
+                    item.get("conversationId") or item.get("id") or
+                    item.get("conversation_id") or item.get("linkedInConversationId") or ""
+                )
+                if not conv_id or conv_id == "None":
                     continue
 
                 existing = session.exec(
@@ -1271,13 +1274,13 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
                     skipped += 1
                     continue
 
-                account_id = str(item.get("accountId", ""))
-                heyreach_camp_id = str(item.get("campaignId", ""))
-                last_message = item.get("lastMessage", "") or ""
-                lead_name = item.get("leadName", "") or ""
-                lead_url = item.get("leadLinkedInUrl", "") or ""
-                lead_title = item.get("leadTitle", "") or ""
-                lead_company = item.get("leadCompany", "") or ""
+                account_id = str(item.get("accountId") or item.get("account_id") or item.get("linkedInAccountId") or "")
+                heyreach_camp_id = str(item.get("campaignId") or item.get("campaign_id") or "")
+                last_message = item.get("lastMessage") or item.get("last_message") or item.get("message") or ""
+                lead_name = item.get("leadName") or item.get("lead_name") or item.get("name") or ""
+                lead_url = item.get("leadLinkedInUrl") or item.get("leadUrl") or item.get("profileUrl") or ""
+                lead_title = item.get("leadTitle") or item.get("lead_title") or item.get("title") or ""
+                lead_company = item.get("leadCompany") or item.get("lead_company") or item.get("company") or ""
 
                 local_campaign = session.exec(
                     select(LinkedInCampaign).where(
