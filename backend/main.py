@@ -9,9 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlmodel import Session, SQLModel, create_engine, func, select
 
-from ai_service import classify_reply, generate_draft, generate_followup, revise_draft
+from ai_service import classify_reply, generate_draft, generate_followup, revise_draft, classify_linkedin_message, generate_linkedin_draft
 from config import settings
-from models import AppSettings, Campaign, FollowUp, Reply
+from models import AppSettings, Campaign, FollowUp, Reply, LinkedInCampaign, LinkedInConversation
+import heyreach_client
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -1113,3 +1114,554 @@ async def update_reply(reply_id: int, status: str = Query(...)):
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat() + "Z"}
+
+
+# ===========================================================================
+# LinkedIn / HeyReach routes
+# ===========================================================================
+
+LINKEDIN_STATUS_MAP = {
+    "IN_PROGRESS": "active",
+    "PAUSED": "paused",
+    "FINISHED": "finished",
+    "DRAFT": "draft",
+    "STOPPED": "stopped",
+}
+
+LINKEDIN_CATEGORIES_LIST = [
+    "interested",
+    "not_interested",
+    "info_request",
+    "referral",
+    "wrong_person",
+    "out_of_office",
+    "already_client",
+]
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn Campaigns
+# ---------------------------------------------------------------------------
+
+@app.get("/api/linkedin/campaigns")
+async def list_linkedin_campaigns():
+    """Return all LinkedIn campaigns stored in the local database."""
+    with get_session() as session:
+        campaigns = list(
+            session.exec(
+                select(LinkedInCampaign).order_by(LinkedInCampaign.created_at.desc())
+            ).all()
+        )
+        return {
+            "campaigns": [
+                {
+                    "id": c.id,
+                    "heyreach_campaign_id": c.heyreach_campaign_id,
+                    "name": c.name,
+                    "status": c.status,
+                    "created_at": c.created_at.isoformat() + "Z",
+                    "updated_at": c.updated_at.isoformat() + "Z",
+                }
+                for c in campaigns
+            ],
+            "total": len(campaigns),
+        }
+
+
+@app.post("/api/linkedin/campaigns/sync")
+async def sync_linkedin_campaigns():
+    """Fetch all campaigns from HeyReach and upsert into local DB."""
+    created = 0
+    updated = 0
+    offset = 0
+    limit = 100
+
+    try:
+        while True:
+            data = await heyreach_client.list_campaigns(offset=offset, limit=limit)
+            items = data.get("items", []) if isinstance(data, dict) else []
+            if not items:
+                break
+
+            with get_session() as session:
+                for item in items:
+                    raw_id = item.get("id")
+                    if not raw_id:
+                        continue
+                    camp_id = str(raw_id)
+
+                    existing = session.exec(
+                        select(LinkedInCampaign).where(
+                            LinkedInCampaign.heyreach_campaign_id == camp_id
+                        )
+                    ).first()
+
+                    camp_name = item.get("name", "") or ""
+                    raw_status = item.get("status", "")
+                    camp_status = LINKEDIN_STATUS_MAP.get(raw_status, raw_status.lower() if raw_status else "unknown")
+
+                    if existing:
+                        existing.name = camp_name or existing.name
+                        existing.status = camp_status
+                        existing.updated_at = datetime.utcnow()
+                        session.add(existing)
+                        updated += 1
+                    else:
+                        campaign = LinkedInCampaign(
+                            heyreach_campaign_id=camp_id,
+                            name=camp_name,
+                            status=camp_status,
+                            created_at=datetime.utcnow(),
+                            updated_at=datetime.utcnow(),
+                        )
+                        session.add(campaign)
+                        created += 1
+                session.commit()
+
+            total_count = data.get("totalCount", 0)
+            offset += limit
+            if offset >= total_count:
+                break
+
+    except Exception as exc:
+        logger.exception("Error syncing LinkedIn campaigns from HeyReach")
+        raise HTTPException(status_code=502, detail=f"HeyReach API error: {exc}")
+
+    logger.info("LinkedIn campaign sync: %d created, %d updated", created, updated)
+    return {"status": "synced", "created": created, "updated": updated}
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn Conversations (inbox)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/linkedin/conversations/sync")
+async def sync_linkedin_conversations():
+    """Fetch unprocessed conversations from HeyReach and classify them."""
+    synced = 0
+    offset = 0
+    limit = 50
+
+    try:
+        while True:
+            data = await heyreach_client.get_conversations(offset=offset, limit=limit)
+            items = data.get("items", []) if isinstance(data, dict) else []
+            if not items:
+                break
+
+            with get_session() as session:
+                for item in items:
+                    conv_id = str(item.get("conversationId", ""))
+                    if not conv_id:
+                        continue
+
+                    existing = session.exec(
+                        select(LinkedInConversation).where(
+                            LinkedInConversation.heyreach_conversation_id == conv_id
+                        )
+                    ).first()
+                    if existing:
+                        continue  # Already processed
+
+                    account_id = str(item.get("accountId", ""))
+                    heyreach_camp_id = str(item.get("campaignId", ""))
+                    last_message = item.get("lastMessage", "") or ""
+                    lead_name = item.get("leadName", "") or ""
+                    lead_url = item.get("leadLinkedInUrl", "") or ""
+                    lead_title = item.get("leadTitle", "") or ""
+                    lead_company = item.get("leadCompany", "") or ""
+
+                    # Look up local campaign
+                    local_campaign = session.exec(
+                        select(LinkedInCampaign).where(
+                            LinkedInCampaign.heyreach_campaign_id == heyreach_camp_id
+                        )
+                    ).first()
+
+                    # Classify the message
+                    category = await classify_linkedin_message(last_message)
+
+                    # Skip out_of_office and wrong_person for draft generation
+                    draft = ""
+                    if category in ("interested", "info_request", "referral"):
+                        campaign_name = local_campaign.name if local_campaign else ""
+                        draft = await generate_linkedin_draft(
+                            message=last_message,
+                            lead_name=lead_name,
+                            lead_title=lead_title,
+                            lead_company=lead_company,
+                            campaign_name=campaign_name,
+                            category=category,
+                        )
+
+                    status = "pending_approval" if draft else "auto_handled"
+
+                    conv = LinkedInConversation(
+                        heyreach_conversation_id=conv_id,
+                        account_id=account_id,
+                        campaign_id=local_campaign.id if local_campaign else None,
+                        heyreach_campaign_id=heyreach_camp_id,
+                        lead_name=lead_name,
+                        lead_linkedin_url=lead_url,
+                        lead_title=lead_title,
+                        lead_company=lead_company,
+                        last_message=last_message,
+                        category=category,
+                        draft_response=draft,
+                        status=status,
+                        created_at=datetime.utcnow(),
+                    )
+                    session.add(conv)
+                    synced += 1
+
+                session.commit()
+
+            total_count = data.get("totalCount", 0)
+            offset += limit
+            if offset >= total_count:
+                break
+
+    except Exception as exc:
+        logger.exception("Error syncing LinkedIn conversations")
+        raise HTTPException(status_code=502, detail=f"HeyReach sync error: {exc}")
+
+    return {"status": "synced", "count": synced}
+
+
+@app.get("/api/linkedin/conversations")
+async def list_linkedin_conversations(
+    page: int = Query(1, ge=1),
+    category: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    per_page: int = Query(50, le=100),
+):
+    """List LinkedIn conversations from local DB with pagination."""
+    with get_session() as session:
+        query = select(LinkedInConversation)
+        if category:
+            query = query.where(LinkedInConversation.category == category)
+        if status:
+            query = query.where(LinkedInConversation.status == status)
+        query = query.order_by(LinkedInConversation.created_at.desc())
+
+        all_convs = list(session.exec(query).all())
+        total = len(all_convs)
+        pages = max(1, (total + per_page - 1) // per_page)
+        offset_val = (page - 1) * per_page
+        page_convs = all_convs[offset_val: offset_val + per_page]
+
+        return {
+            "conversations": [
+                {
+                    "id": c.id,
+                    "heyreach_conversation_id": c.heyreach_conversation_id,
+                    "account_id": c.account_id,
+                    "lead_name": c.lead_name,
+                    "lead_linkedin_url": c.lead_linkedin_url,
+                    "lead_title": c.lead_title,
+                    "lead_company": c.lead_company,
+                    "last_message": c.last_message,
+                    "category": c.category,
+                    "draft_response": c.draft_response,
+                    "status": c.status,
+                    "campaign_id": c.campaign_id,
+                    "heyreach_campaign_id": c.heyreach_campaign_id,
+                    "created_at": c.created_at.isoformat() + "Z",
+                    "sent_at": (c.sent_at.isoformat() + "Z") if c.sent_at else None,
+                }
+                for c in page_convs
+            ],
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": pages,
+        }
+
+
+@app.get("/api/linkedin/conversations/{conv_id}")
+async def get_linkedin_conversation(conv_id: int):
+    """Get a single LinkedIn conversation with its full thread from HeyReach."""
+    with get_session() as session:
+        conv = session.get(LinkedInConversation, conv_id)
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Fetch full thread from HeyReach
+        thread = []
+        try:
+            raw = await heyreach_client.get_conversation(
+                account_id=conv.account_id,
+                conversation_id=conv.heyreach_conversation_id,
+            )
+            messages = raw.get("messages", raw.get("chatRoomMessages", []))
+            for msg in messages:
+                thread.append({
+                    "content": msg.get("message", msg.get("content", "")),
+                    "sent_at": msg.get("sentAt", msg.get("timestamp", "")),
+                    "is_outgoing": msg.get("isOutgoing", False),
+                })
+        except Exception as exc:
+            logger.warning("Could not fetch HeyReach thread for conv %s: %s", conv_id, exc)
+
+        return {
+            "id": conv.id,
+            "heyreach_conversation_id": conv.heyreach_conversation_id,
+            "account_id": conv.account_id,
+            "lead_name": conv.lead_name,
+            "lead_linkedin_url": conv.lead_linkedin_url,
+            "lead_title": conv.lead_title,
+            "lead_company": conv.lead_company,
+            "last_message": conv.last_message,
+            "category": conv.category,
+            "draft_response": conv.draft_response,
+            "status": conv.status,
+            "created_at": conv.created_at.isoformat() + "Z",
+            "sent_at": (conv.sent_at.isoformat() + "Z") if conv.sent_at else None,
+            "thread": thread,
+        }
+
+
+class LinkedInFeedbackRequest(BaseModel):
+    feedback: str
+
+
+@app.post("/api/linkedin/conversations/{conv_id}/feedback")
+async def linkedin_conversation_feedback(conv_id: int, body: LinkedInFeedbackRequest):
+    """Revise a LinkedIn draft based on feedback."""
+    with get_session() as session:
+        conv = session.get(LinkedInConversation, conv_id)
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        campaign_name = ""
+        if conv.campaign_id:
+            camp = session.get(LinkedInCampaign, conv.campaign_id)
+            if camp:
+                campaign_name = camp.name
+
+        # Re-generate using feedback as additional instruction
+        new_draft = await generate_linkedin_draft(
+            message=conv.last_message + f"\n\n[User feedback on previous draft: {body.feedback}]",
+            lead_name=conv.lead_name,
+            lead_title=conv.lead_title,
+            lead_company=conv.lead_company,
+            campaign_name=campaign_name,
+            category=conv.category,
+        )
+
+        conv.draft_response = new_draft
+        session.add(conv)
+        session.commit()
+
+        return {"id": conv_id, "draft_response": new_draft, "status": conv.status}
+
+
+@app.post("/api/linkedin/conversations/{conv_id}/approve")
+async def approve_linkedin_conversation(conv_id: int):
+    """Approve and send a LinkedIn reply via HeyReach."""
+    with get_session() as session:
+        conv = session.get(LinkedInConversation, conv_id)
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if not conv.draft_response:
+            raise HTTPException(status_code=400, detail="No draft to send")
+
+        try:
+            await heyreach_client.send_message(
+                conversation_id=conv.heyreach_conversation_id,
+                account_id=conv.account_id,
+                message=conv.draft_response,
+            )
+        except Exception as exc:
+            logger.exception("Failed to send LinkedIn message via HeyReach")
+            raise HTTPException(status_code=502, detail=f"HeyReach send error: {exc}")
+
+        conv.status = "sent"
+        conv.sent_at = datetime.utcnow()
+        session.add(conv)
+        session.commit()
+
+        return {
+            "status": "sent",
+            "id": conv_id,
+            "sent_at": conv.sent_at.isoformat() + "Z",
+        }
+
+
+@app.post("/api/linkedin/conversations/{conv_id}/reject")
+async def reject_linkedin_conversation(conv_id: int):
+    """Reject a LinkedIn conversation draft."""
+    with get_session() as session:
+        conv = session.get(LinkedInConversation, conv_id)
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conv.status = "rejected"
+        session.add(conv)
+        session.commit()
+        return {"status": "rejected", "id": conv_id}
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn Analytics Dashboard
+# ---------------------------------------------------------------------------
+
+@app.get("/api/linkedin/analytics/dashboard")
+async def linkedin_analytics_dashboard(
+    period: str = Query("month", description="all|today|week|month"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+):
+    """Return the full LinkedIn analytics dashboard payload."""
+    from datetime import timedelta
+
+    def _period_start(p: str):
+        now = datetime.utcnow()
+        if p == "today":
+            return now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif p == "week":
+            return now - timedelta(days=7)
+        elif p == "month":
+            return now - timedelta(days=30)
+        return None
+
+    # --- Local conversation stats ---
+    with get_session() as session:
+        all_conversations = list(session.exec(select(LinkedInConversation)).all())
+        all_campaigns = list(session.exec(select(LinkedInCampaign)).all())
+
+    period_start = _period_start(period)
+    conversations = [c for c in all_conversations if c.created_at >= period_start] if period_start else all_conversations
+
+    total_conversations = len(conversations)
+
+    by_category = {cat: 0 for cat in LINKEDIN_CATEGORIES_LIST}
+    for c in conversations:
+        if c.category in by_category:
+            by_category[c.category] += 1
+
+    statuses = ["pending_approval", "approved", "rejected", "sent", "auto_handled"]
+    by_status = {s: 0 for s in statuses}
+    for c in conversations:
+        if c.status in by_status:
+            by_status[c.status] += 1
+
+    interest_rate = round(by_category["interested"] / total_conversations, 4) if total_conversations else 0.0
+
+    response_times = []
+    for c in conversations:
+        if c.sent_at and c.created_at:
+            delta = (c.sent_at - c.created_at).total_seconds() / 3600
+            response_times.append(delta)
+    avg_response_hours = round(sum(response_times) / len(response_times), 1) if response_times else 0.0
+
+    # Daily volumes — last 30 days
+    now = datetime.utcnow()
+    daily_map = {}
+    for c in all_conversations:
+        key = c.created_at.strftime("%Y-%m-%d")
+        daily_map[key] = daily_map.get(key, 0) + 1
+
+    daily_volumes = []
+    for i in range(30):
+        key = (now - timedelta(days=29 - i)).strftime("%Y-%m-%d")
+        daily_volumes.append({"date": key, "count": daily_map.get(key, 0)})
+
+    # Per-campaign breakdown
+    campaign_map = {}
+    for c in all_conversations:
+        campaign_map.setdefault(c.campaign_id, []).append(c)
+
+    campaign_stats = []
+    for camp in all_campaigns:
+        camp_convs = campaign_map.get(camp.id, [])
+        total = len(camp_convs)
+        breakdown = {cat: sum(1 for c in camp_convs if c.category == cat) for cat in LINKEDIN_CATEGORIES_LIST}
+        camp_interest_rate = round(breakdown["interested"] / total, 4) if total else 0.0
+        campaign_stats.append({
+            "id": camp.id,
+            "heyreach_campaign_id": camp.heyreach_campaign_id,
+            "name": camp.name,
+            "status": camp.status,
+            "total_conversations": total,
+            "by_category": breakdown,
+            "interest_rate": camp_interest_rate,
+        })
+    campaign_stats.sort(key=lambda x: x["total_conversations"], reverse=True)
+
+    # --- HeyReach live stats ---
+    if not start_date:
+        start_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+    if not end_date:
+        end_date = now.strftime("%Y-%m-%d")
+
+    heyreach_stats = {}
+    heyreach_error = None
+
+    try:
+        raw_stats = await heyreach_client.get_overall_stats(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        by_day = raw_stats.get("byDayStats", {})
+        totals = {
+            "profileViews": 0,
+            "messagesSent": 0,
+            "totalMessageStarted": 0,
+            "totalMessageReplies": 0,
+            "inmailMessagesSent": 0,
+            "totalInmailStarted": 0,
+            "totalInmailReplies": 0,
+            "connectionsSent": 0,
+            "connectionsAccepted": 0,
+        }
+        for day_data in by_day.values():
+            for key in totals:
+                totals[key] += int(day_data.get(key, 0))
+
+        acceptance_rate = (
+            round(totals["connectionsAccepted"] / totals["connectionsSent"], 4)
+            if totals["connectionsSent"] > 0 else 0.0
+        )
+        reply_rate = (
+            round(totals["totalMessageReplies"] / totals["totalMessageStarted"], 4)
+            if totals["totalMessageStarted"] > 0 else 0.0
+        )
+        inmail_reply_rate = (
+            round(totals["totalInmailReplies"] / totals["totalInmailStarted"], 4)
+            if totals["totalInmailStarted"] > 0 else 0.0
+        )
+
+        heyreach_stats = {
+            "connections_sent": totals["connectionsSent"],
+            "connections_accepted": totals["connectionsAccepted"],
+            "acceptance_rate": acceptance_rate,
+            "messages_sent": totals["messagesSent"],
+            "messages_replied": totals["totalMessageReplies"],
+            "reply_rate": reply_rate,
+            "inmails_sent": totals["inmailMessagesSent"],
+            "inmails_replied": totals["totalInmailReplies"],
+            "inmail_reply_rate": inmail_reply_rate,
+            "profile_views": totals["profileViews"],
+        }
+    except Exception as exc:
+        logger.warning("Could not fetch HeyReach stats: %s", exc)
+        heyreach_error = str(exc)
+        heyreach_stats = {
+            "connections_sent": 0, "connections_accepted": 0, "acceptance_rate": 0.0,
+            "messages_sent": 0, "messages_replied": 0, "reply_rate": 0.0,
+            "inmails_sent": 0, "inmails_replied": 0, "inmail_reply_rate": 0.0,
+            "profile_views": 0,
+        }
+
+    return {
+        "total_conversations": total_conversations,
+        "by_category": by_category,
+        "by_status": by_status,
+        "interest_rate": interest_rate,
+        "avg_response_hours": avg_response_hours,
+        "daily_volumes": daily_volumes,
+        "campaigns": campaign_stats,
+        "heyreach_stats": heyreach_stats,
+        "heyreach_stats_error": heyreach_error,
+        "heyreach_stats_period": {"start_date": start_date, "end_date": end_date},
+    }

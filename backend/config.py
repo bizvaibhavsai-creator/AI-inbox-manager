@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Playbook paths
     playbook_path: str = str(Path(__file__).parent.parent / "playbook.md")
     followups_path: str = str(Path(__file__).parent.parent / "followups.md")
+    linkedin_playbook_path: str = str(Path(__file__).parent.parent / "linkedin_playbook.md")
+
+    # HeyReach (LinkedIn automation)
+    heyreach_api_key: str = ""
 
     # Follow-up windows (hours)
     # Follow-up 1: 2 hours, Follow-up 2: 24h, Follow-up 3-9: every 24h

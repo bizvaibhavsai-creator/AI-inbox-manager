@@ -188,3 +188,131 @@ export function updateSettings(approval_mode: string): Promise<AppSettingsRespon
     body: JSON.stringify({ approval_mode }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// LinkedIn / HeyReach
+// ---------------------------------------------------------------------------
+
+export interface LinkedInCampaign {
+  id: number;
+  heyreach_campaign_id: string;
+  name: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LinkedInConversation {
+  id: number;
+  heyreach_conversation_id: string;
+  account_id: string;
+  lead_name: string;
+  lead_linkedin_url: string;
+  lead_title: string;
+  lead_company: string;
+  last_message: string;
+  category: string;
+  draft_response: string;
+  status: string;
+  campaign_id: number | null;
+  heyreach_campaign_id: string;
+  created_at: string;
+  sent_at: string | null;
+}
+
+export interface LinkedInConversationDetail extends LinkedInConversation {
+  thread: { content: string; sent_at: string; is_outgoing: boolean }[];
+}
+
+export interface LinkedInConversationsResponse {
+  conversations: LinkedInConversation[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface LinkedInAnalyticsDashboard {
+  total_conversations: number;
+  by_category: Record<string, number>;
+  by_status: Record<string, number>;
+  interest_rate: number;
+  avg_response_hours: number;
+  daily_volumes: { date: string; count: number }[];
+  campaigns: {
+    id: number;
+    heyreach_campaign_id: string;
+    name: string;
+    status: string;
+    total_conversations: number;
+    by_category: Record<string, number>;
+    interest_rate: number;
+  }[];
+  heyreach_stats: {
+    connections_sent: number;
+    connections_accepted: number;
+    acceptance_rate: number;
+    messages_sent: number;
+    messages_replied: number;
+    reply_rate: number;
+    inmails_sent: number;
+    inmails_replied: number;
+    inmail_reply_rate: number;
+    profile_views: number;
+  };
+  heyreach_stats_error: string | null;
+  heyreach_stats_period: { start_date: string; end_date: string };
+}
+
+export function syncLinkedInCampaigns(): Promise<{ status: string; created: number; updated: number }> {
+  return fetchAPI("/api/linkedin/campaigns/sync", { method: "POST" });
+}
+
+export function getLinkedInCampaigns(): Promise<{ campaigns: LinkedInCampaign[]; total: number }> {
+  return fetchAPI("/api/linkedin/campaigns");
+}
+
+export function syncLinkedInConversations(): Promise<{ status: string; count: number }> {
+  return fetchAPI("/api/linkedin/conversations/sync", { method: "POST" });
+}
+
+export function getLinkedInConversations(
+  page = 1,
+  category?: string,
+  status?: string
+): Promise<LinkedInConversationsResponse> {
+  const params = new URLSearchParams({ page: String(page) });
+  if (category) params.set("category", category);
+  if (status) params.set("status", status);
+  return fetchAPI(`/api/linkedin/conversations?${params}`);
+}
+
+export function getLinkedInConversation(id: number): Promise<LinkedInConversationDetail> {
+  return fetchAPI(`/api/linkedin/conversations/${id}`);
+}
+
+export function submitLinkedInFeedback(id: number, feedback: string): Promise<{ id: number; draft_response: string; status: string }> {
+  return fetchAPI(`/api/linkedin/conversations/${id}/feedback`, {
+    method: "POST",
+    body: JSON.stringify({ feedback }),
+  });
+}
+
+export function approveLinkedInConversation(id: number): Promise<{ status: string; id: number; sent_at: string }> {
+  return fetchAPI(`/api/linkedin/conversations/${id}/approve`, { method: "POST" });
+}
+
+export function rejectLinkedInConversation(id: number): Promise<{ status: string; id: number }> {
+  return fetchAPI(`/api/linkedin/conversations/${id}/reject`, { method: "POST" });
+}
+
+export function getLinkedInAnalyticsDashboard(
+  period = "month",
+  start_date?: string,
+  end_date?: string
+): Promise<LinkedInAnalyticsDashboard> {
+  const params = new URLSearchParams({ period });
+  if (start_date) params.set("start_date", start_date);
+  if (end_date) params.set("end_date", end_date);
+  return fetchAPI(`/api/linkedin/analytics/dashboard?${params}`);
+}

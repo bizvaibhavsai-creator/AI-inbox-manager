@@ -313,3 +313,119 @@ def _mock_followup(lead_email: str, sequence_num: int) -> str:
         3: f"Hey {name}, last note from me — don't want to clog your inbox. If things change, I'm here. All the best!",
     }
     return followups.get(sequence_num, f"Hi {name}, just following up on my previous message.")
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn (HeyReach) AI functions
+# ---------------------------------------------------------------------------
+
+LINKEDIN_CATEGORIES = [
+    "interested",
+    "not_interested",
+    "info_request",
+    "referral",
+    "wrong_person",
+    "out_of_office",
+    "already_client",
+]
+
+LINKEDIN_CLASSIFICATION_PROMPT = """You are an expert at classifying B2B LinkedIn message responses.
+
+Classify the prospect's latest LinkedIn message into exactly ONE of these categories:
+
+- interested: The prospect expresses interest, wants to learn more, asks for a call/meeting, or gives a positive signal
+- not_interested: The prospect explicitly declines, says not a fit, or gives a clear negative response
+- info_request: The prospect asks for more information, pricing, case studies, or specifics before committing
+- referral: The prospect refers you to someone else at their company or externally
+- wrong_person: The prospect says they're not the right contact
+- out_of_office: Out of office / auto-reply / vacation message
+- already_client: The prospect is already a client or working with someone similar
+
+Respond with ONLY the category name, nothing else.
+
+LinkedIn message:
+{message}"""
+
+LINKEDIN_DRAFT_PROMPT = """You are a LinkedIn outreach reply agent. You STRICTLY follow the playbook below. Do not improvise or add information not in the playbook. If the playbook does not cover the prospect's message, output "Needs Josh's help" as the entire response.
+
+PLAYBOOK (follow this EXACTLY):
+{playbook}
+
+CONTEXT:
+- Lead name: {lead_name}
+- Lead title: {lead_title}
+- Lead company: {lead_company}
+- Campaign: {campaign_name}
+- Their reply category: {category}
+- Their latest message: {message}
+
+ABSOLUTE RULES (NEVER BREAK THESE):
+1. NEVER use em dashes, en dashes, hyphens, or any dash character. Rewrite sentences to avoid them.
+2. Keep it SHORT. LinkedIn messages should be 2-4 sentences max. Never write long paragraphs.
+3. Sound natural and conversational, not like a sales pitch.
+4. Every sentence must be its own paragraph with a blank line between them.
+5. End with a clear next step or question.
+6. NEVER use more than 1 exclamation mark.
+7. Do not use email-style greetings or sign-offs. LinkedIn messages are casual.
+
+Write ONLY the message text. No explanations."""
+
+
+async def classify_linkedin_message(message: str) -> str:
+    """Classify a LinkedIn message into a category."""
+    if not client or settings.test_mode:
+        return "interested"
+
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "user",
+                "content": LINKEDIN_CLASSIFICATION_PROMPT.format(message=message),
+            }
+        ],
+        temperature=0,
+        max_tokens=20,
+    )
+    category = response.choices[0].message.content.strip().lower()
+    if category not in LINKEDIN_CATEGORIES:
+        return "not_interested"
+    return category
+
+
+async def generate_linkedin_draft(
+    message: str,
+    lead_name: str,
+    lead_title: str,
+    lead_company: str,
+    campaign_name: str,
+    category: str,
+) -> str:
+    """Generate a LinkedIn reply draft using the LinkedIn playbook."""
+    if not client or settings.test_mode:
+        return f"Hey {lead_name}, thanks for the reply! Would love to connect on a quick call to share more. When works for you?"
+
+    playbook = _load_file(settings.linkedin_playbook_path)
+    if not playbook:
+        playbook = "(No playbook provided - use professional B2B LinkedIn messaging best practices)"
+
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "user",
+                "content": LINKEDIN_DRAFT_PROMPT.format(
+                    playbook=playbook,
+                    lead_name=lead_name,
+                    lead_title=lead_title,
+                    lead_company=lead_company,
+                    campaign_name=campaign_name,
+                    category=category,
+                    message=message,
+                ),
+            }
+        ],
+        temperature=0.7,
+        max_tokens=200,
+    )
+    return response.choices[0].message.content.strip()

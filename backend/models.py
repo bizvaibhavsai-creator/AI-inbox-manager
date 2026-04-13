@@ -62,3 +62,42 @@ class FollowUp(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     reply: Optional[Reply] = Relationship(back_populates="follow_ups")
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn (HeyReach) models
+# ---------------------------------------------------------------------------
+
+class LinkedInCampaign(SQLModel, table=True):
+    __tablename__ = "linkedin_campaigns"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    heyreach_campaign_id: str = Field(index=True, unique=True)
+    name: str
+    status: str = "unknown"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    conversations: list["LinkedInConversation"] = Relationship(back_populates="campaign")
+
+
+class LinkedInConversation(SQLModel, table=True):
+    __tablename__ = "linkedin_conversations"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    heyreach_conversation_id: str = Field(index=True, unique=True)
+    account_id: str = ""
+    campaign_id: Optional[int] = Field(default=None, foreign_key="linkedin_campaigns.id", index=True)
+    heyreach_campaign_id: str = ""
+    lead_name: str = ""
+    lead_linkedin_url: str = ""
+    lead_title: str = ""
+    lead_company: str = ""
+    last_message: str = ""
+    category: str = ""
+    draft_response: str = ""
+    status: str = "pending_classification"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    sent_at: Optional[datetime] = None
+
+    campaign: Optional[LinkedInCampaign] = Relationship(back_populates="conversations")

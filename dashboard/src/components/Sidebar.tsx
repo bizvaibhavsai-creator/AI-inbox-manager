@@ -44,6 +44,27 @@ const navItems = [
   },
 ];
 
+const linkedInNavItems = [
+  {
+    href: "/linkedin",
+    label: "Analytics",
+    icon: (
+      <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/linkedin/inbox",
+    label: "Inbox",
+    icon: (
+      <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+      </svg>
+    ),
+  },
+];
+
 export default function Sidebar() {
   const pathname = usePathname();
   const [mode, setMode] = useState<"human" | "automated">("human");
@@ -79,12 +100,12 @@ export default function Sidebar() {
         </p>
       </div>
 
-      <nav className="flex-1 px-3 pt-2">
+      <nav className="flex-1 overflow-y-auto px-3 pt-2">
         <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest" style={{ color: "#b0b7c8" }}>
-          Menu
+          Email
         </p>
         {navItems.map((item) => {
-          const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href) && !pathname.startsWith("/linkedin");
 
           return (
             <Link
@@ -94,6 +115,35 @@ export default function Sidebar() {
               style={
                 isActive
                   ? { color: "#3366FF", backgroundColor: "#f0f4ff" }
+                  : { color: "#5a6176" }
+              }
+              onMouseEnter={(e) => {
+                if (!isActive) e.currentTarget.style.backgroundColor = "#f5f7fa";
+              }}
+              onMouseLeave={(e) => {
+                if (!isActive) e.currentTarget.style.backgroundColor = "transparent";
+              }}
+            >
+              {item.icon}
+              {item.label}
+            </Link>
+          );
+        })}
+
+        <p className="mb-2 mt-4 px-3 text-[10px] font-semibold uppercase tracking-widest" style={{ color: "#b0b7c8" }}>
+          LinkedIn
+        </p>
+        {linkedInNavItems.map((item) => {
+          const isActive = item.href === "/linkedin" ? pathname === "/linkedin" : pathname.startsWith(item.href);
+
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="mb-0.5 flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all"
+              style={
+                isActive
+                  ? { color: "#0A66C2", backgroundColor: "#e8f0fa" }
                   : { color: "#5a6176" }
               }
               onMouseEnter={(e) => {
