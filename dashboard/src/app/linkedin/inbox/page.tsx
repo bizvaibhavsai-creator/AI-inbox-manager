@@ -20,6 +20,7 @@ const categoryStyles: Record<string, { bg: string; color: string; label: string 
   wrong_person: { bg: "#f5f3ff", color: "#8b5cf6", label: "Wrong Person" },
   out_of_office: { bg: "#f3f4f6", color: "#6b7280", label: "OOO" },
   already_client: { bg: "#f0fdf4", color: "#16a34a", label: "Already Client" },
+  outgoing: { bg: "#f3f4f6", color: "#9ca3af", label: "Outgoing" },
 };
 
 const statusStyles: Record<string, { bg: string; color: string; label: string }> = {
@@ -85,7 +86,13 @@ export default function LinkedInInboxPage() {
       if (result.error) {
         setSyncMsg(`Sync error: ${result.error}`);
       } else {
-        setSyncMsg(`Synced ${result.count} new, ${result.skipped} already stored`);
+        const parts: string[] = [];
+        if (result.count > 0) parts.push(`${result.count} new`);
+        if (result.updated > 0) parts.push(`${result.updated} updated`);
+        if (result.classified > 0) parts.push(`${result.classified} classified`);
+        if (result.drafted > 0) parts.push(`${result.drafted} drafts ready`);
+        if (result.skipped > 0) parts.push(`${result.skipped} unchanged`);
+        setSyncMsg(parts.length > 0 ? `Synced: ${parts.join(", ")}` : "No new conversations");
       }
       const data = await getLinkedInConversations(1, categoryFilter || undefined, statusFilter || undefined);
       setConversations(data.conversations);
@@ -192,6 +199,7 @@ export default function LinkedInInboxPage() {
               <option value="wrong_person">Wrong Person</option>
               <option value="out_of_office">OOO</option>
               <option value="already_client">Already Client</option>
+              <option value="outgoing">Outgoing</option>
             </select>
             <select
               value={statusFilter}

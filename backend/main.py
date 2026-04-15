@@ -1136,6 +1136,7 @@ LINKEDIN_CATEGORIES_LIST = [
     "wrong_person",
     "out_of_office",
     "already_client",
+    "outgoing",
 ]
 
 
@@ -1237,21 +1238,21 @@ async def sync_linkedin_campaigns():
 
 @app.post("/api/linkedin/conversations/sync")
 async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000)):
-    """Fetch the most recent conversations from HeyReach and store them.
-
-    Capped at max_conversations (default 200) to keep sync fast.
-    Classification and draft generation happen lazily when a conversation is opened.
+    """Fetch the most recent conversations from HeyReach, store/update them,
+    then run AI classification and draft generation for all pending conversations.
     """
     synced = 0
     skipped = 0
-    offset = 0
-    limit = 50
+    updated = 0
+    pending_ids: list[int] = []  # conversation DB ids that need classification
 
     error_detail = None
     try:
         data = await heyreach_client.get_conversations(offset=0, limit=max_conversations)
         items = data.get("items", []) if isinstance(data, dict) else []
         if items:
+            # Log first item keys for debugging API shape
+            logger.info("V2 conversation item keys: %s", list(items[0].keys()))
             profile = items[0].get("correspondentProfile") or {}
             logger.info("V2 correspondentProfile keys+values: %s", dict(list(profile.items())[:12]))
 
@@ -1265,19 +1266,16 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
                 if not conv_id or conv_id == "None":
                     continue
 
-                existing = session.exec(
-                    select(LinkedInConversation).where(
-                        LinkedInConversation.heyreach_conversation_id == conv_id
-                    )
-                ).first()
-                if existing:
-                    skipped += 1
-                    continue
-
                 # V2 field names (confirmed from API response)
                 account_id = str(item.get("linkedInAccountId") or item.get("accountId") or "")
                 heyreach_camp_id = str(item.get("campaignId") or "")
                 last_message = item.get("lastMessageText") or item.get("lastMessage") or ""
+
+                # Detect if last message is from us (outgoing) — try known HeyReach fields
+                is_last_msg_outgoing = item.get("isLastMessageFromMe") or item.get("isLastMessageOutgoing")
+                if is_last_msg_outgoing is None:
+                    # Fallback: check other indicators
+                    is_last_msg_outgoing = False
 
                 # Lead info is nested inside correspondentProfile in V2
                 profile = item.get("correspondentProfile") or {}
@@ -1288,11 +1286,47 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
                 lead_title = profile.get("headline") or profile.get("title") or profile.get("position") or ""
                 lead_company = profile.get("companyName") or profile.get("company") or ""
 
+                existing = session.exec(
+                    select(LinkedInConversation).where(
+                        LinkedInConversation.heyreach_conversation_id == conv_id
+                    )
+                ).first()
+
+                if existing:
+                    # Update if last_message changed (prospect sent a new reply)
+                    if last_message and last_message != existing.last_message:
+                        existing.last_message = last_message
+                        existing.lead_name = lead_name or existing.lead_name
+                        existing.lead_title = lead_title or existing.lead_title
+                        existing.lead_company = lead_company or existing.lead_company
+                        existing.lead_linkedin_url = lead_url or existing.lead_linkedin_url
+
+                        if is_last_msg_outgoing:
+                            # Last message is from us — we already replied, no action needed
+                            if existing.status not in ("sent",):
+                                existing.status = "auto_handled"
+                        else:
+                            # New inbound message from prospect — re-classify
+                            existing.status = "pending_classification"
+                            existing.category = ""
+                            existing.draft_response = ""
+
+                        session.add(existing)
+                        session.flush()
+                        if existing.status == "pending_classification":
+                            pending_ids.append(existing.id)
+                        updated += 1
+                    else:
+                        skipped += 1
+                    continue
+
                 local_campaign = session.exec(
                     select(LinkedInCampaign).where(
                         LinkedInCampaign.heyreach_campaign_id == heyreach_camp_id
                     )
                 ).first()
+
+                initial_status = "auto_handled" if is_last_msg_outgoing else "pending_classification"
 
                 conv = LinkedInConversation(
                     heyreach_conversation_id=conv_id,
@@ -1306,10 +1340,13 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
                     last_message=last_message,
                     category="",
                     draft_response="",
-                    status="pending_classification",
+                    status=initial_status,
                     created_at=datetime.utcnow(),
                 )
                 session.add(conv)
+                session.flush()
+                if initial_status == "pending_classification":
+                    pending_ids.append(conv.id)
                 synced += 1
 
             session.commit()
@@ -1318,8 +1355,66 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
         logger.exception("Error syncing LinkedIn conversations")
         error_detail = str(exc)
 
-    logger.info("LinkedIn conversation sync: %d new, %d already existed", synced, skipped)
-    return {"status": "synced", "count": synced, "skipped": skipped, "error": error_detail}
+    # --- Phase 2: Classify and draft all pending conversations ---
+    classified = 0
+    drafted = 0
+    if pending_ids and not error_detail:
+        with get_session() as session:
+            for cid in pending_ids:
+                conv = session.get(LinkedInConversation, cid)
+                if not conv or not conv.last_message:
+                    continue
+                try:
+                    category = await classify_linkedin_message(conv.last_message)
+                    conv.category = category
+                    classified += 1
+
+                    # If AI detected this is our outgoing message, skip drafting
+                    if category == "outgoing":
+                        conv.draft_response = ""
+                        conv.status = "auto_handled"
+                        session.add(conv)
+                        session.commit()
+                        continue
+
+                    draft = ""
+                    if category in ("interested", "info_request", "referral"):
+                        campaign_name = ""
+                        if conv.campaign_id:
+                            camp = session.get(LinkedInCampaign, conv.campaign_id)
+                            if camp:
+                                campaign_name = camp.name
+                        draft = await generate_linkedin_draft(
+                            message=conv.last_message,
+                            lead_name=conv.lead_name,
+                            lead_title=conv.lead_title,
+                            lead_company=conv.lead_company,
+                            campaign_name=campaign_name,
+                            category=category,
+                        )
+                        if draft:
+                            drafted += 1
+
+                    conv.draft_response = draft
+                    conv.status = "pending_approval" if draft else "auto_handled"
+                    session.add(conv)
+                    session.commit()
+                except Exception as exc:
+                    logger.warning("Classification/draft failed for conv %s: %s", cid, exc)
+
+    logger.info(
+        "LinkedIn sync: %d new, %d updated, %d skipped, %d classified, %d drafted",
+        synced, updated, skipped, classified, drafted,
+    )
+    return {
+        "status": "synced",
+        "count": synced,
+        "updated": updated,
+        "skipped": skipped,
+        "classified": classified,
+        "drafted": drafted,
+        "error": error_detail,
+    }
 
 
 @app.get("/api/linkedin/conversations")
@@ -1374,44 +1469,17 @@ async def list_linkedin_conversations(
 
 @app.get("/api/linkedin/conversations/{conv_id}")
 async def get_linkedin_conversation(conv_id: int):
-    """Get a single LinkedIn conversation. Runs AI classification + draft on first open."""
+    """Get a single LinkedIn conversation with full thread.
+
+    If the conversation is still pending_classification (e.g. sync was interrupted),
+    runs classification + draft generation using the full thread for better context.
+    """
     with get_session() as session:
         conv = session.get(LinkedInConversation, conv_id)
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-        # Lazy classification: run AI the first time this conversation is opened
-        if conv.status == "pending_classification" and conv.last_message:
-            try:
-                category = await classify_linkedin_message(conv.last_message)
-                conv.category = category
-
-                campaign_name = ""
-                if conv.campaign_id:
-                    camp = session.get(LinkedInCampaign, conv.campaign_id)
-                    if camp:
-                        campaign_name = camp.name
-
-                draft = ""
-                if category in ("interested", "info_request", "referral"):
-                    draft = await generate_linkedin_draft(
-                        message=conv.last_message,
-                        lead_name=conv.lead_name,
-                        lead_title=conv.lead_title,
-                        lead_company=conv.lead_company,
-                        campaign_name=campaign_name,
-                        category=category,
-                    )
-
-                conv.draft_response = draft
-                conv.status = "pending_approval" if draft else "auto_handled"
-                session.add(conv)
-                session.commit()
-                session.refresh(conv)
-            except Exception as exc:
-                logger.warning("Lazy classification failed for conv %s: %s", conv_id, exc)
-
-        # Fetch full thread from HeyReach
+        # Fetch full thread from HeyReach first — we may need it for classification
         thread = []
         try:
             raw = await heyreach_client.get_conversation(
@@ -1435,6 +1503,60 @@ async def get_linkedin_conversation(conv_id: int):
                     })
         except Exception as exc:
             logger.warning("Could not fetch HeyReach thread for conv %s: %s", conv_id, exc)
+
+        # Fallback classification: run AI if still pending (sync may have been interrupted)
+        if conv.status == "pending_classification" and conv.last_message:
+            try:
+                # Find the prospect's last inbound message from thread for better classification
+                prospect_last_msg = conv.last_message
+                for msg in reversed(thread):
+                    if not msg["is_outgoing"] and msg["content"].strip():
+                        prospect_last_msg = msg["content"]
+                        break
+
+                category = await classify_linkedin_message(prospect_last_msg)
+                conv.category = category
+
+                if category == "outgoing":
+                    conv.draft_response = ""
+                    conv.status = "auto_handled"
+                else:
+                    draft = ""
+                    if category in ("interested", "info_request", "referral"):
+                        campaign_name = ""
+                        if conv.campaign_id:
+                            camp = session.get(LinkedInCampaign, conv.campaign_id)
+                            if camp:
+                                campaign_name = camp.name
+
+                        # Build thread summary for better draft context
+                        thread_context = ""
+                        if thread:
+                            recent_msgs = thread[-6:]  # Last 6 messages for context
+                            thread_lines = []
+                            for m in recent_msgs:
+                                role = "Us" if m["is_outgoing"] else "Prospect"
+                                thread_lines.append(f"{role}: {m['content']}")
+                            thread_context = "\n".join(thread_lines)
+
+                        draft = await generate_linkedin_draft(
+                            message=prospect_last_msg,
+                            lead_name=conv.lead_name,
+                            lead_title=conv.lead_title,
+                            lead_company=conv.lead_company,
+                            campaign_name=campaign_name,
+                            category=category,
+                            thread_context=thread_context,
+                        )
+
+                    conv.draft_response = draft
+                    conv.status = "pending_approval" if draft else "auto_handled"
+
+                session.add(conv)
+                session.commit()
+                session.refresh(conv)
+            except Exception as exc:
+                logger.warning("Lazy classification failed for conv %s: %s", conv_id, exc)
 
         return {
             "id": conv.id,

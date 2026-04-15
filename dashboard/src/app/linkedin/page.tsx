@@ -16,6 +16,7 @@ const categoryLabels: Record<string, string> = {
   wrong_person: "Wrong Person",
   out_of_office: "Out of Office",
   already_client: "Already Client",
+  outgoing: "Outgoing",
 };
 
 const categoryColors: Record<string, string> = {
@@ -26,6 +27,7 @@ const categoryColors: Record<string, string> = {
   wrong_person: "#8b5cf6",
   out_of_office: "#d97706",
   already_client: "#10b981",
+  outgoing: "#9ca3af",
 };
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {

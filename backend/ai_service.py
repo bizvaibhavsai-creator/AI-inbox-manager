@@ -327,19 +327,23 @@ LINKEDIN_CATEGORIES = [
     "wrong_person",
     "out_of_office",
     "already_client",
+    "outgoing",
 ]
 
 LINKEDIN_CLASSIFICATION_PROMPT = """You are an expert at classifying B2B LinkedIn message responses.
 
-Classify the prospect's latest LinkedIn message into exactly ONE of these categories:
+IMPORTANT: First determine if this message was sent BY the sales rep (outgoing) or BY the prospect (inbound). Clues that it is outgoing/from the sales rep: it pitches a service, mentions booking links, uses phrases like "would you be open to", "happy to share", "feel free to book". If the message is clearly from the sales rep and NOT from the prospect, classify as "outgoing".
 
-- interested: The prospect expresses interest, wants to learn more, asks for a call/meeting, or gives a positive signal
+If the message IS from the prospect, classify it into exactly ONE of these categories:
+
+- interested: The prospect expresses interest, wants to learn more, asks for a call/meeting, or gives a positive signal. Also includes prospects who propose specific meeting times, share their availability, or ask "when can we talk"
 - not_interested: The prospect explicitly declines, says not a fit, or gives a clear negative response
 - info_request: The prospect asks for more information, pricing, case studies, or specifics before committing
 - referral: The prospect refers you to someone else at their company or externally
 - wrong_person: The prospect says they're not the right contact
 - out_of_office: Out of office / auto-reply / vacation message
 - already_client: The prospect is already a client or working with someone similar
+- outgoing: The message is from the sales rep, not the prospect
 
 Respond with ONLY the category name, nothing else.
 
@@ -358,7 +362,7 @@ CONTEXT:
 - Campaign: {campaign_name}
 - Their reply category: {category}
 - Their latest message: {message}
-
+{thread_section}
 ABSOLUTE RULES (NEVER BREAK THESE):
 1. NEVER use em dashes, en dashes, hyphens, or any dash character. Rewrite sentences to avoid them.
 2. Keep it SHORT. LinkedIn messages should be 2-4 sentences max. Never write long paragraphs.
@@ -367,6 +371,8 @@ ABSOLUTE RULES (NEVER BREAK THESE):
 5. End with a clear next step or question.
 6. NEVER use more than 1 exclamation mark.
 7. Do not use email-style greetings or sign-offs. LinkedIn messages are casual.
+8. Address the prospect's specific questions or concerns. Never give a generic reply that ignores what they said.
+9. Always write from an individual perspective using "I" and "me", not "us" and "we" when referring to yourself. Only use "we" when talking about the agency's results generally.
 
 Write ONLY the message text. No explanations."""
 
@@ -390,6 +396,7 @@ async def classify_linkedin_message(message: str) -> str:
     category = response.choices[0].message.content.strip().lower()
     if category not in LINKEDIN_CATEGORIES:
         return "not_interested"
+    # Map "outgoing" to a flag the caller can handle
     return category
 
 
@@ -400,6 +407,7 @@ async def generate_linkedin_draft(
     lead_company: str,
     campaign_name: str,
     category: str,
+    thread_context: str = "",
 ) -> str:
     """Generate a LinkedIn reply draft using the LinkedIn playbook."""
     if not client or settings.test_mode:
@@ -408,6 +416,10 @@ async def generate_linkedin_draft(
     playbook = _load_file(settings.linkedin_playbook_path)
     if not playbook:
         playbook = "(No playbook provided - use professional B2B LinkedIn messaging best practices)"
+
+    thread_section = ""
+    if thread_context:
+        thread_section = f"\nCONVERSATION THREAD (for context, reply to the prospect's latest message):\n{thread_context}\n"
 
     response = await client.chat.completions.create(
         model="gpt-4o",
@@ -422,6 +434,7 @@ async def generate_linkedin_draft(
                     campaign_name=campaign_name,
                     category=category,
                     message=message,
+                    thread_section=thread_section,
                 ),
             }
         ],
