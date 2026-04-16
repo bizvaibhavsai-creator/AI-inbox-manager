@@ -731,6 +731,72 @@ async def submit_feedback(reply_id: int, request: FeedbackRequest):
 
 
 # ---------------------------------------------------------------------------
+# Redraft recent replies (regenerate AI drafts from scratch)
+# ---------------------------------------------------------------------------
+@app.post("/api/replies/redraft-recent")
+async def redraft_recent(count: int = Query(10, le=50)):
+    """Re-run AI draft generation on the most recent replies.
+
+    Useful after playbook or prompt changes to see updated drafts.
+    Only redrafts replies with category 'interested' or 'info_request'.
+    """
+    results = []
+    with get_session() as session:
+        replies = list(
+            session.exec(
+                select(Reply)
+                .where(Reply.category.in_(["interested", "info_request"]))
+                .order_by(Reply.received_at.desc())
+                .limit(count)
+            ).all()
+        )
+
+    for r in replies:
+        try:
+            # Extract sender name from existing draft sign-off or fallback
+            sender_name = "Unknown"
+            if r.draft_response:
+                signoff = re.search(r'(?:Best|Cheers|Thanks|Regards)[,\s]*\n\s*([A-Z][a-z]+)', r.draft_response)
+                if signoff:
+                    sender_name = signoff.group(1)
+
+            new_draft = await generate_draft(
+                reply_body=r.reply_body,
+                lead_email=r.lead_email,
+                campaign_name=r.campaign_name,
+                category=r.category,
+                sender_name=sender_name,
+            )
+
+            with get_session() as session:
+                reply = session.get(Reply, r.id)
+                old_draft = reply.draft_response
+                reply.draft_response = new_draft
+                if new_draft and "needs josh" not in new_draft.lower():
+                    reply.status = "pending_approval"
+                session.add(reply)
+                session.commit()
+
+            results.append({
+                "reply_id": r.id,
+                "lead_email": r.lead_email,
+                "category": r.category,
+                "old_draft_preview": (old_draft or "")[:100],
+                "new_draft_preview": (new_draft or "")[:100],
+                "changed": old_draft != new_draft,
+            })
+        except Exception as exc:
+            logger.warning("Redraft failed for reply %s: %s", r.id, exc)
+            results.append({
+                "reply_id": r.id,
+                "lead_email": r.lead_email,
+                "error": str(exc),
+            })
+
+    return {"redrafted": len(results), "results": results}
+
+
+# ---------------------------------------------------------------------------
 # Get single reply with full text
 # ---------------------------------------------------------------------------
 @app.get("/api/replies/{reply_id}")
