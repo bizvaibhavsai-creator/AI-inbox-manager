@@ -1217,20 +1217,74 @@ async def _fetch_linkedin_thread(account_id: str, conversation_id: str) -> list[
             account_id=account_id,
             conversation_id=conversation_id,
         )
-        messages = raw.get("messages", raw.get("chatRoomMessages", []))
+
+        # Log response shape once so we know what HeyReach actually returns
+        if isinstance(raw, dict):
+            logger.info("HeyReach chatroom response keys: %s", list(raw.keys()))
+        else:
+            logger.info("HeyReach chatroom response type: %s", type(raw).__name__)
+
+        # Try multiple paths to find the messages list
+        messages = []
+        if isinstance(raw, dict):
+            messages = (
+                raw.get("messages")
+                or raw.get("chatRoomMessages")
+                or raw.get("items")
+                or raw.get("data")
+                or raw.get("chatMessages")
+                or []
+            )
+            # Last resort: find any list of dicts in the top-level response
+            if not messages:
+                for key, val in raw.items():
+                    if isinstance(val, list) and val and isinstance(val[0], dict):
+                        logger.info("Found messages-like list at key '%s' (%d items)", key, len(val))
+                        messages = val
+                        break
+        elif isinstance(raw, list):
+            messages = raw
+
+        if messages and isinstance(messages[0], dict):
+            logger.info("First message keys: %s", list(messages[0].keys()))
+
         thread = []
         for msg in messages:
-            content = (msg.get("text") or msg.get("message") or
-                       msg.get("content") or msg.get("lastMessageText") or "")
-            sent_at = msg.get("sentAt") or msg.get("timestamp") or msg.get("createdAt") or ""
-            sender = msg.get("senderType") or ""
-            is_outgoing = sender.upper() == "ME" or msg.get("isOutgoing", False)
+            if not isinstance(msg, dict):
+                continue
+            content = (
+                msg.get("text")
+                or msg.get("message")
+                or msg.get("content")
+                or msg.get("body")
+                or msg.get("messageText")
+                or msg.get("lastMessageText")
+                or ""
+            )
+            sent_at = (
+                msg.get("sentAt")
+                or msg.get("timestamp")
+                or msg.get("createdAt")
+                or msg.get("date")
+                or msg.get("sent_at")
+                or ""
+            )
+            sender_type = str(msg.get("senderType") or msg.get("sender") or "").upper()
+            is_outgoing = (
+                sender_type == "ME"
+                or sender_type == "SENDER"
+                or sender_type == "OUTGOING"
+                or bool(msg.get("isOutgoing"))
+                or bool(msg.get("isFromMe"))
+                or bool(msg.get("isSentByMe"))
+            )
             if content:
                 thread.append({
                     "content": content,
                     "sent_at": sent_at,
                     "is_outgoing": is_outgoing,
                 })
+        logger.info("Parsed %d messages from HeyReach thread for conv %s", len(thread), conversation_id)
         return thread
     except Exception as exc:
         logger.warning("Failed to fetch thread for conv %s: %s", conversation_id, exc)
