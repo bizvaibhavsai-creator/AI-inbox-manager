@@ -1206,6 +1206,59 @@ LINKEDIN_CATEGORIES_LIST = [
 ]
 
 
+async def _fetch_linkedin_thread(account_id: str, conversation_id: str) -> list[dict]:
+    """Fetch and parse the full message thread for a LinkedIn conversation.
+
+    Returns a list of {content, sent_at, is_outgoing} dicts ordered oldest to newest.
+    Returns [] on error.
+    """
+    try:
+        raw = await heyreach_client.get_conversation(
+            account_id=account_id,
+            conversation_id=conversation_id,
+        )
+        messages = raw.get("messages", raw.get("chatRoomMessages", []))
+        thread = []
+        for msg in messages:
+            content = (msg.get("text") or msg.get("message") or
+                       msg.get("content") or msg.get("lastMessageText") or "")
+            sent_at = msg.get("sentAt") or msg.get("timestamp") or msg.get("createdAt") or ""
+            sender = msg.get("senderType") or ""
+            is_outgoing = sender.upper() == "ME" or msg.get("isOutgoing", False)
+            if content:
+                thread.append({
+                    "content": content,
+                    "sent_at": sent_at,
+                    "is_outgoing": is_outgoing,
+                })
+        return thread
+    except Exception as exc:
+        logger.warning("Failed to fetch thread for conv %s: %s", conversation_id, exc)
+        return []
+
+
+def _extract_prospect_latest(thread: list[dict], fallback: str) -> str:
+    """Find the prospect's latest inbound message from the thread.
+    Falls back to `fallback` if no inbound message is found.
+    """
+    for msg in reversed(thread):
+        if not msg["is_outgoing"] and msg["content"].strip():
+            return msg["content"]
+    return fallback
+
+
+def _build_thread_context(thread: list[dict], max_msgs: int = 8) -> str:
+    """Build a readable thread context string for the AI prompt."""
+    if not thread:
+        return ""
+    recent = thread[-max_msgs:]
+    lines = []
+    for m in recent:
+        role = "Us" if m["is_outgoing"] else "Prospect"
+        lines.append(f"{role}: {m['content']}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # LinkedIn Campaigns
 # ---------------------------------------------------------------------------
@@ -1431,7 +1484,26 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
                 if not conv or not conv.last_message:
                     continue
                 try:
-                    category = await classify_linkedin_message(conv.last_message)
+                    # Fetch the full conversation thread for better context
+                    thread = await _fetch_linkedin_thread(
+                        account_id=conv.account_id,
+                        conversation_id=conv.heyreach_conversation_id,
+                    )
+
+                    # Identify the prospect's latest inbound message
+                    prospect_msg = _extract_prospect_latest(thread, fallback=conv.last_message)
+
+                    # If the last message in the thread is from us, this conversation
+                    # is already handled — we're waiting on the prospect
+                    if thread and thread[-1]["is_outgoing"]:
+                        conv.category = "outgoing"
+                        conv.draft_response = ""
+                        conv.status = "auto_handled"
+                        session.add(conv)
+                        session.commit()
+                        continue
+
+                    category = await classify_linkedin_message(prospect_msg)
                     conv.category = category
                     classified += 1
 
@@ -1450,13 +1522,17 @@ async def sync_linkedin_conversations(max_conversations: int = Query(50, le=1000
                             camp = session.get(LinkedInCampaign, conv.campaign_id)
                             if camp:
                                 campaign_name = camp.name
+
+                        thread_context = _build_thread_context(thread)
+
                         draft = await generate_linkedin_draft(
-                            message=conv.last_message,
+                            message=prospect_msg,
                             lead_name=conv.lead_name,
                             lead_title=conv.lead_title,
                             lead_company=conv.lead_company,
                             campaign_name=campaign_name,
                             category=category,
+                            thread_context=thread_context,
                         )
                         if draft:
                             drafted += 1
@@ -1545,41 +1621,16 @@ async def get_linkedin_conversation(conv_id: int):
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-        # Fetch full thread from HeyReach first — we may need it for classification
-        thread = []
-        try:
-            raw = await heyreach_client.get_conversation(
-                account_id=conv.account_id,
-                conversation_id=conv.heyreach_conversation_id,
-            )
-            # V2: messages array with text/sentAt/senderType fields
-            messages = raw.get("messages", raw.get("chatRoomMessages", []))
-            for msg in messages:
-                content = (msg.get("text") or msg.get("message") or
-                           msg.get("content") or msg.get("lastMessageText") or "")
-                sent_at = msg.get("sentAt") or msg.get("timestamp") or msg.get("createdAt") or ""
-                # senderType: "ME" = outgoing, anything else = incoming
-                sender = msg.get("senderType") or ""
-                is_outgoing = sender.upper() == "ME" or msg.get("isOutgoing", False)
-                if content:
-                    thread.append({
-                        "content": content,
-                        "sent_at": sent_at,
-                        "is_outgoing": is_outgoing,
-                    })
-        except Exception as exc:
-            logger.warning("Could not fetch HeyReach thread for conv %s: %s", conv_id, exc)
+        # Fetch full conversation thread from HeyReach (shared helper)
+        thread = await _fetch_linkedin_thread(
+            account_id=conv.account_id,
+            conversation_id=conv.heyreach_conversation_id,
+        )
 
         # Fallback classification: run AI if still pending (sync may have been interrupted)
         if conv.status == "pending_classification" and conv.last_message:
             try:
-                # Find the prospect's last inbound message from thread for better classification
-                prospect_last_msg = conv.last_message
-                for msg in reversed(thread):
-                    if not msg["is_outgoing"] and msg["content"].strip():
-                        prospect_last_msg = msg["content"]
-                        break
-
+                prospect_last_msg = _extract_prospect_latest(thread, fallback=conv.last_message)
                 category = await classify_linkedin_message(prospect_last_msg)
                 conv.category = category
 
@@ -1595,15 +1646,7 @@ async def get_linkedin_conversation(conv_id: int):
                             if camp:
                                 campaign_name = camp.name
 
-                        # Build thread summary for better draft context
-                        thread_context = ""
-                        if thread:
-                            recent_msgs = thread[-6:]  # Last 6 messages for context
-                            thread_lines = []
-                            for m in recent_msgs:
-                                role = "Us" if m["is_outgoing"] else "Prospect"
-                                thread_lines.append(f"{role}: {m['content']}")
-                            thread_context = "\n".join(thread_lines)
+                        thread_context = _build_thread_context(thread)
 
                         draft = await generate_linkedin_draft(
                             message=prospect_last_msg,
@@ -1648,7 +1691,7 @@ class LinkedInFeedbackRequest(BaseModel):
 
 @app.post("/api/linkedin/conversations/{conv_id}/feedback")
 async def linkedin_conversation_feedback(conv_id: int, body: LinkedInFeedbackRequest):
-    """Revise a LinkedIn draft based on feedback."""
+    """Revise a LinkedIn draft based on feedback. Uses the full thread for context."""
     with get_session() as session:
         conv = session.get(LinkedInConversation, conv_id)
         if not conv:
@@ -1660,16 +1703,26 @@ async def linkedin_conversation_feedback(conv_id: int, body: LinkedInFeedbackReq
             if camp:
                 campaign_name = camp.name
 
-        # Re-generate using feedback as additional instruction
-        new_draft = await generate_linkedin_draft(
-            message=conv.last_message + f"\n\n[User feedback on previous draft: {body.feedback}]",
-            lead_name=conv.lead_name,
-            lead_title=conv.lead_title,
-            lead_company=conv.lead_company,
-            campaign_name=campaign_name,
-            category=conv.category,
-        )
+    # Fetch full thread to give the revision better context
+    thread = await _fetch_linkedin_thread(
+        account_id=conv.account_id,
+        conversation_id=conv.heyreach_conversation_id,
+    )
+    prospect_msg = _extract_prospect_latest(thread, fallback=conv.last_message)
+    thread_context = _build_thread_context(thread)
 
+    new_draft = await generate_linkedin_draft(
+        message=prospect_msg + f"\n\n[User feedback on previous draft: {body.feedback}]",
+        lead_name=conv.lead_name,
+        lead_title=conv.lead_title,
+        lead_company=conv.lead_company,
+        campaign_name=campaign_name,
+        category=conv.category,
+        thread_context=thread_context,
+    )
+
+    with get_session() as session:
+        conv = session.get(LinkedInConversation, conv_id)
         conv.draft_response = new_draft
         session.add(conv)
         session.commit()
