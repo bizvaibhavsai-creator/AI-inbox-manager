@@ -160,19 +160,70 @@ async def send_message(
     """Send a LinkedIn message in an existing conversation.
 
     POST /inbox/SendMessage
-    Body: { conversationId, accountId, message }
+    HeyReach V2 uses linkedInConversationId/linkedInAccountId field names.
+    We try V2 first, then fall back to V1 legacy names if that fails.
     """
-    body: Dict[str, Any] = {
-        "conversationId": conversation_id,
-        "accountId": account_id,
-        "message": message,
-    }
+    # Try multiple payload shapes — HeyReach V2 field names differ from V1
+    payload_variants = [
+        # V2 shape (matches GetConversationsV2 field names)
+        {
+            "linkedInConversationId": conversation_id,
+            "linkedInAccountId": account_id,
+            "text": message,
+        },
+        {
+            "linkedInConversationId": conversation_id,
+            "linkedInAccountId": account_id,
+            "message": message,
+        },
+        # V1 legacy shape
+        {
+            "conversationId": conversation_id,
+            "accountId": account_id,
+            "message": message,
+        },
+        # Alternate V1
+        {
+            "conversationId": conversation_id,
+            "accountId": account_id,
+            "text": message,
+        },
+    ]
+
+    last_error_body = ""
+    last_status = 0
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/inbox/SendMessage",
-            headers=_headers(),
-            json=body,
-        )
-        response.raise_for_status()
-        return response.json()
+        for i, body in enumerate(payload_variants):
+            try:
+                response = await client.post(
+                    f"{BASE_URL}/inbox/SendMessage",
+                    headers=_headers(),
+                    json=body,
+                )
+                if response.status_code < 400:
+                    logger.info(
+                        "HeyReach send_message succeeded with payload variant %d (keys: %s)",
+                        i, list(body.keys()),
+                    )
+                    try:
+                        return response.json()
+                    except Exception:
+                        return {"status": "sent"}
+                last_status = response.status_code
+                last_error_body = response.text[:500]
+                logger.warning(
+                    "HeyReach SendMessage variant %d failed: %d — %s",
+                    i, response.status_code, last_error_body,
+                )
+                # Only retry with next variant on 400-level errors (bad field names)
+                # For 401/403/5xx there's no point in trying other payloads
+                if response.status_code in (401, 403) or response.status_code >= 500:
+                    break
+            except httpx.HTTPError as exc:
+                last_error_body = str(exc)
+                logger.warning("HeyReach SendMessage variant %d HTTP error: %s", i, exc)
+
+    raise RuntimeError(
+        f"HeyReach SendMessage failed (status {last_status}): {last_error_body}"
+    )

@@ -1793,6 +1793,16 @@ async def approve_linkedin_conversation(conv_id: int):
             raise HTTPException(status_code=404, detail="Conversation not found")
         if not conv.draft_response:
             raise HTTPException(status_code=400, detail="No draft to send")
+        if not conv.heyreach_conversation_id or not conv.account_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing HeyReach identifiers (conv_id={conv.heyreach_conversation_id}, account_id={conv.account_id})",
+            )
+
+        logger.info(
+            "Approving LinkedIn conv %s: sending to HeyReach (conv=%s account=%s len=%d)",
+            conv_id, conv.heyreach_conversation_id, conv.account_id, len(conv.draft_response),
+        )
 
         try:
             await heyreach_client.send_message(
