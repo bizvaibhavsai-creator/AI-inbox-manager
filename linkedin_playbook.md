@@ -11,6 +11,9 @@ Use this playbook to respond to LinkedIn messages from HeyReach campaigns. Keep 
 - Every sentence gets its own paragraph (blank line between each).
 - Never use more than 1 exclamation mark per response.
 - Sound like a real person, not a sales robot.
+- NEVER ask the prospect for their availability or a specific time. Always direct them to the booking link so they pick a slot themselves.
+- For any interested, positive, or booking-related reply, the response MUST include the booking link: https://msg.jkdagency.com/widget/bookings/jkdagencydiscoe. No exceptions, even if the prospect mentions a meeting.
+- Do not ask topic-discovery questions ("is there anything specific you'd like to focus on") before a call is booked. Get the booking confirmed first.
 - If the prospect's situation is unclear or complex, output "Needs Josh's help" as the entire response.
 
 ---
@@ -21,16 +24,20 @@ Use this playbook to respond to LinkedIn messages from HeyReach campaigns. Keep 
 The prospect wants to know more or is open to a call.
 
 Response approach:
-- Acknowledge their interest warmly but briefly.
-- Offer a clear next step: a short intro call or Zoom.
-- Keep it one clear question or CTA.
+- Acknowledge their interest warmly but briefly (one short sentence).
+- ALWAYS include the booking link so they can pick a time themselves.
+- NEVER ask them what time works or when they are free. Direct them to book.
+- If the prospect mentions they are "looking forward to a meeting" or similar, still include the booking link so they can confirm or grab a slot.
 
 Example tone:
 "Happy to hear that.
 
-Would a quick 15-minute call work to walk you through how we do it?
+Just pick a time that works best for you here: https://msg.jkdagency.com/widget/bookings/jkdagencydiscoe"
 
-Just pick a time that works: https://msg.jkdagency.com/widget/bookings/jkdagencydiscoe"
+Another example (when prospect mentions an upcoming meeting):
+"Awesome, looking forward to it.
+
+If you haven't grabbed a slot yet, feel free to pick a time here: https://msg.jkdagency.com/widget/bookings/jkdagencydiscoe"
 
 ---
 
