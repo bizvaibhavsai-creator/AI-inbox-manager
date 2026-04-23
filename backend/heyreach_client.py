@@ -162,7 +162,20 @@ async def send_message(
     POST /inbox/SendMessage
     HeyReach V2 uses linkedInConversationId/linkedInAccountId field names.
     We try V2 first, then fall back to V1 legacy names if that fails.
+
+    We also include flags (sendNow, immediate, skipDelay, bypassQueue) that
+    some HeyReach plans accept to skip the default queue delay.
     """
+    # Flags that commonly request immediate/instant send on various LinkedIn automation APIs.
+    # HeyReach will ignore unknown fields, so sending extras is harmless.
+    instant_flags = {
+        "sendNow": True,
+        "immediate": True,
+        "skipDelay": True,
+        "bypassQueue": True,
+        "priority": "high",
+    }
+
     # Try multiple payload shapes — HeyReach V2 field names differ from V1
     payload_variants = [
         # V2 shape (matches GetConversationsV2 field names)
@@ -170,23 +183,27 @@ async def send_message(
             "linkedInConversationId": conversation_id,
             "linkedInAccountId": account_id,
             "text": message,
+            **instant_flags,
         },
         {
             "linkedInConversationId": conversation_id,
             "linkedInAccountId": account_id,
             "message": message,
+            **instant_flags,
         },
         # V1 legacy shape
         {
             "conversationId": conversation_id,
             "accountId": account_id,
             "message": message,
+            **instant_flags,
         },
         # Alternate V1
         {
             "conversationId": conversation_id,
             "accountId": account_id,
             "text": message,
+            **instant_flags,
         },
     ]
 
@@ -206,9 +223,13 @@ async def send_message(
                         "HeyReach send_message succeeded with payload variant %d (keys: %s)",
                         i, list(body.keys()),
                     )
+                    # Log FULL response body — reveals if HeyReach queued it vs sent immediately
                     try:
-                        return response.json()
+                        resp_json = response.json()
+                        logger.info("HeyReach SendMessage response: %s", resp_json)
+                        return resp_json
                     except Exception:
+                        logger.info("HeyReach SendMessage raw text: %s", response.text[:500])
                         return {"status": "sent"}
                 last_status = response.status_code
                 last_error_body = response.text[:500]
